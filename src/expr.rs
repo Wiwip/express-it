@@ -116,108 +116,30 @@ macro_rules! impl_select_expr {
 impl_select_expr!(IntExprNode: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_select_expr!(FloatExprNode: f32, f64);
 
-#[macro_export]
-macro_rules! impl_math_expr_rhs_primitive {
-    (@impl $x:ty, $select:ident) => {
-        impl<Ctx: EvalContext> std::ops::Add<$x> for Expr<$x, Ctx, $select<$x, Ctx>> {
-            type Output = Expr<$x, Ctx, $select<$x, Ctx>>;
+macro_rules! impl_math_ops {
+        ($($trait:ident => $method:ident),*,) => {
+            $(
+                impl<N, Ctx> std::ops::$trait<N> for Expr<N, Ctx, SelectExprNode<N, Ctx>>
+                where
+                    N: Num + SelectExprNodeImpl<Property = N>,
+                    Ctx: EvalContext,
+                    SelectExprNode<N, Ctx>: ExprNode<N, Ctx>,
+                    Self: std::ops::$trait<Self, Output = Self> + From<N>,
+                {
+                    type Output = Self;
 
-            fn add(self, rhs: $x) -> Self::Output {
-                self + Expr::new(Arc::new($select::Lit(rhs)))
-            }
-        }
-
-        impl<Ctx: EvalContext> std::ops::Sub<$x> for Expr<$x, Ctx, $select<$x, Ctx>> {
-            type Output = Expr<$x, Ctx, $select<$x, Ctx>>;
-
-            fn sub(self, rhs: $x) -> Self::Output {
-                self - Expr::new(Arc::new($select::Lit(rhs)))
-            }
-        }
-
-        impl<Ctx: EvalContext> std::ops::Mul<$x> for Expr<$x, Ctx, $select<$x, Ctx>> {
-            type Output = Expr<$x, Ctx, $select<$x, Ctx>>;
-
-            fn mul(self, rhs: $x) -> Self::Output {
-                self * Expr::new(Arc::new($select::Lit(rhs)))
-            }
-        }
-
-        impl<Ctx: EvalContext> std::ops::Div<$x> for Expr<$x, Ctx, $select<$x, Ctx>> {
-            type Output = Expr<$x, Ctx, $select<$x, Ctx>>;
-
-            fn div(self, rhs: $x) -> Self::Output {
-                self / Expr::new(Arc::new($select::Lit(rhs)))
-            }
-        }
-
-        impl<Ctx: EvalContext> std::ops::Rem<$x> for Expr<$x, Ctx, $select<$x, Ctx>> {
-            type Output = Expr<$x, Ctx, $select<$x, Ctx>>;
-
-            fn rem(self, rhs: $x) -> Self::Output {
-                self % Expr::new(Arc::new($select::Lit(rhs)))
-            }
-        }
-    };
-    ($select:ident: $($x:ty),+ $(,)?) => {
-        $(
-            $crate::impl_math_expr_rhs_primitive!(@impl $x, $select);
-        )+
-    };
-}
-
-impl_math_expr_rhs_primitive!(IntExprNode: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
-impl_math_expr_rhs_primitive!(FloatExprNode: f32, f64);
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::context::RetrieveAttribute;
-
-    #[derive(Copy, Clone)]
-    struct DummyContext {
-        lhs_value: f32,
-        rhs_value: f32,
-        signed_int_value: i32,
-        unsigned_int_value: u32,
+                    fn $method(self, rhs: N) -> Self::Output {
+                        std::ops::$trait::$method(self, Self::from(rhs))
+                    }
+                }
+            )*
+        };
     }
 
-    impl DummyContext {
-        fn new(lhs: f32, rhs: f32, signed: i32, unsigned: u32) -> Self {
-            Self {
-                lhs_value: lhs,
-                rhs_value: rhs,
-                signed_int_value: signed,
-                unsigned_int_value: unsigned,
-            }
-        }
-    }
-
-    impl EvalContext for DummyContext {
-        fn get<N: Num>(&self, attribute: &Box<dyn RetrieveAttribute<N, Self>>) -> N {
-            attribute.retrieve(self).unwrap()
-        }
-    }
-
-    #[derive(Debug)]
-    struct LhsTest;
-
-    impl LhsTest {
-        fn expr() -> Expr<f32, DummyContext, FloatExprNode<f32, DummyContext>> {
-            Expr::new(Arc::new(FloatExprNode::Attribute(Box::new(LhsTest))))
-        }
-    }
-
-    impl RetrieveAttribute<f32, DummyContext> for LhsTest {
-        fn retrieve(&self, ctx: &DummyContext) -> Result<f32, ExpressionError> {
-            Ok(ctx.lhs_value)
-        }
-    }
-
-    #[test]
-    fn test_serialize() {
-        let expr = LhsTest::expr();
-
-        //let result = serde_json::to_string(&expr);
-    }
-}
+impl_math_ops!(
+    Add => add,
+    Sub => sub,
+    Mul => mul,
+    Div => div,
+    Rem => rem,
+);
