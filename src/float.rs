@@ -7,8 +7,69 @@ use std::any::type_name;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::sync::Arc;
+use crate::logic::{BoolExpr, BoolExprNode, Compare, ComparisonOp};
 
 pub type FloatExpr<N, Ctx> = Expr<N, Ctx, FloatExprNode<N, Ctx>>;
+
+impl<N, Ctx> FloatExpr<N, Ctx>
+where
+    N: Float + Send + Sync + 'static,
+    Ctx: EvalContext + 'static,
+{
+    pub fn gt(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+        let cmp = Compare {
+            lhs: self,
+            op: ComparisonOp::Gt,
+            rhs: rhs.into(),
+        };
+        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
+    }
+
+    pub fn ge(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+        let cmp = Compare {
+            lhs: self,
+            op: ComparisonOp::Ge,
+            rhs: rhs.into(),
+        };
+        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
+    }
+
+    pub fn lt(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+        let cmp = Compare {
+            lhs: self,
+            op: ComparisonOp::Lt,
+            rhs: rhs.into(),
+        };
+        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
+    }
+
+    pub fn le(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+        let cmp = Compare {
+            lhs: self,
+            op: ComparisonOp::Le,
+            rhs: rhs.into(),
+        };
+        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
+    }
+
+    pub fn eq(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+        let cmp = Compare {
+            lhs: self,
+            op: ComparisonOp::Eq,
+            rhs: rhs.into(),
+        };
+        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
+    }
+
+    pub fn ne(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+        let cmp = Compare {
+            lhs: self,
+            op: ComparisonOp::Ne,
+            rhs: rhs.into(),
+        };
+        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
+    }
+}
 
 #[derive(Default)]
 pub enum FloatExprNode<N: Float + Send + Sync, Ctx: EvalContext> {
@@ -26,10 +87,6 @@ pub enum FloatExprNode<N: Float + Send + Sync, Ctx: EvalContext> {
         op: FloatBinaryOp,
         rhs: FloatExpr<N, Ctx>,
     },
-
-}
-
-impl<N: Float + Send + Sync, Ctx: EvalContext> FloatExprNode<N, Ctx> {
 
 }
 
@@ -132,6 +189,7 @@ where
         Ok(self.inner.eval(ctx)?.as_())
     }
 }
+
 
 #[derive(Debug, Clone, Copy)]
 pub enum FloatUnaryOp {

@@ -6,17 +6,17 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub trait ExprNode<N: Num, Ctx: EvalContext>: Send + Sync {
+pub trait ExprNode<N, Ctx: EvalContext>: Send + Sync {
     fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError>;
 }
 
 #[derive(Default, Debug)]
-pub struct Expr<N: Num, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> {
+pub struct Expr<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> {
     pub inner: Arc<Nd>,
     phantom: std::marker::PhantomData<(N, Ctx)>,
 }
 
-impl<N: Num, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Expr<N, Ctx, Nd> {
+impl<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Expr<N, Ctx, Nd> {
     pub fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
         self.inner.eval(ctx)
     }
@@ -29,7 +29,7 @@ impl<N: Num, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Expr<N, Ctx, Nd> {
     }
 }
 
-impl<N: Num, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Clone for Expr<N, Ctx, Nd> {
+impl<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Clone for Expr<N, Ctx, Nd> {
     fn clone(&self) -> Self {
         Expr::new(self.inner.clone())
     }
@@ -59,7 +59,7 @@ impl std::fmt::Display for ExpressionError {
                 write!(f, "Invalid expression type.")
             }
             ExpressionError::InvalidOperationNeg => {
-                write!(f, "Expression does not support negation.")
+                write!(f, "Unsigned expression do not support negation.")
             }
         }
     }

@@ -26,6 +26,38 @@ pub enum IntExprNode<N: PrimInt + CheckedNeg + Send + Sync, Ctx: EvalContext> {
     },
 }
 
+
+impl<N: PrimInt + CheckedNeg + Send + Sync, Ctx: EvalContext> ExprNode<N, Ctx>
+    for IntExprNode<N, Ctx>
+{
+    fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
+        match self {
+            IntExprNode::None => Err(ExpressionError::EmptyExpr),
+            IntExprNode::Lit(lit) => Ok(lit.clone()),
+            IntExprNode::Attribute(attribute) => Ok(ctx.get(attribute)),
+            IntExprNode::Cast(cast) => Ok(cast.eval(ctx)?),
+            IntExprNode::UnaryOp { op, expr } => match op {
+                IntUnaryOp::Neg => expr
+                    .eval(ctx)?
+                    .checked_neg()
+                    .ok_or(ExpressionError::InvalidOperationNeg),
+            },
+            IntExprNode::BinaryOp { lhs, op, rhs } => {
+                let l = lhs.eval(ctx)?;
+                let r = rhs.eval(ctx)?;
+                match op {
+                    IntBinaryOp::Add => Ok(l + r),
+                    IntBinaryOp::Sub => Ok(l - r),
+                    IntBinaryOp::Mul => Ok(l * r),
+                    IntBinaryOp::Div => Ok(l / r),
+                    IntBinaryOp::Rem => Ok(l % r),
+                    IntBinaryOp::Pow => Ok(l.pow(r.to_u32().ok_or(ExpressionError::InvalidTypes)?)),
+                }
+            }
+        }
+    }
+}
+
 impl<NIn, Ctx> Expr<NIn, Ctx, IntExprNode<NIn, Ctx>>
 where
     NIn: PrimInt + CheckedNeg + Send + Sync + 'static,
@@ -69,37 +101,6 @@ impl_int_binary_ops!(
         Rem => (rem, Rem)
     ]
 );
-
-impl<N: PrimInt + CheckedNeg + Send + Sync, Ctx: EvalContext> ExprNode<N, Ctx>
-    for IntExprNode<N, Ctx>
-{
-    fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
-        match self {
-            IntExprNode::None => Err(ExpressionError::EmptyExpr),
-            IntExprNode::Lit(lit) => Ok(lit.clone()),
-            IntExprNode::Attribute(attribute) => Ok(ctx.get(attribute)),
-            IntExprNode::Cast(cast) => Ok(cast.eval(ctx)?),
-            IntExprNode::UnaryOp { op, expr } => match op {
-                IntUnaryOp::Neg => expr
-                    .eval(ctx)?
-                    .checked_neg()
-                    .ok_or(ExpressionError::InvalidOperationNeg),
-            },
-            IntExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.eval(ctx)?;
-                let r = rhs.eval(ctx)?;
-                match op {
-                    IntBinaryOp::Add => Ok(l + r),
-                    IntBinaryOp::Sub => Ok(l - r),
-                    IntBinaryOp::Mul => Ok(l * r),
-                    IntBinaryOp::Div => Ok(l / r),
-                    IntBinaryOp::Rem => Ok(l % r),
-                    IntBinaryOp::Pow => Ok(l.pow(r.to_u32().ok_or(ExpressionError::InvalidTypes)?)),
-                }
-            }
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub enum IntUnaryOp {

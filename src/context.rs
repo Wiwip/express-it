@@ -6,6 +6,6 @@ pub trait EvalContext: Send + Sync {
     fn get<N: Num>(&self, attribute: &Box<dyn RetrieveAttribute<N, Self>>) -> N;
 }
 
-pub trait RetrieveAttribute<N: Num, Ctx: EvalContext>: Debug + Send + Sync {
+pub trait RetrieveAttribute<N, Ctx: EvalContext>: Debug + Send + Sync {
     fn retrieve(&self, ctx: &Ctx) -> Result<N, ExpressionError>;
 }

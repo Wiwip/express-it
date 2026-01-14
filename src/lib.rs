@@ -3,6 +3,10 @@ pub mod expr;
 pub mod float;
 pub mod integer;
 pub mod macros;
+pub mod logic;
+
+#[cfg(test)]
+mod test_utils;
 
 #[cfg(test)]
 mod tests {
@@ -68,6 +72,7 @@ mod tests {
             Ok(ctx.rhs_value)
         }
     }
+
     #[derive(Debug)]
     struct IIntTest;
 
