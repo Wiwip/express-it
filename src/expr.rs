@@ -1,17 +1,18 @@
 use crate::context::EvalContext;
 use crate::float::FloatExprNode;
 use crate::integer::IntExprNode;
-use num_traits::Num;
+use crate::num_cast::{CastFrom, CastNumPrimitive};
+use num_traits::{AsPrimitive, Num};
 use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub trait ExprNode<N, Ctx: EvalContext>: Send + Sync {
+pub trait ExprNode<N, Ctx> {
     fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError>;
 }
 
 #[derive(Default, Debug)]
-pub struct Expr<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> {
+pub struct Expr<N, Ctx, Nd> {
     pub inner: Arc<Nd>,
     phantom: std::marker::PhantomData<(N, Ctx)>,
 }
@@ -29,6 +30,25 @@ impl<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Expr<N, Ctx, Nd> {
     }
 }
 
+impl<NIn, Ctx, Nd> Expr<NIn, Ctx, Nd>
+where
+    NIn: Copy + Send + Sync + 'static,
+    Ctx: EvalContext + 'static,
+    Nd: ExprNode<NIn, Ctx> + 'static,
+{
+    pub fn as_<NOut, NdOut: ExprNode<NOut, Ctx>>(&self) -> Expr<NOut, Ctx, NdOut>
+    where
+        NOut: Num + Copy + Send + Sync + 'static,
+        NIn: AsPrimitive<NOut>,
+        NdOut: ExprNode<NOut, Ctx> + CastFrom<NOut, Ctx>,
+    {
+        let inner = Expr::new(self.inner.clone());
+        let cast_node = CastNumPrimitive::new(inner);
+        let expr_node = NdOut::cast_from(Box::new(cast_node));
+        Expr::new(Arc::new(expr_node))
+    }
+}
+
 impl<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Clone for Expr<N, Ctx, Nd> {
     fn clone(&self) -> Self {
         Expr::new(self.inner.clone())
@@ -41,6 +61,7 @@ pub enum ExpressionError {
     EmptyExpr,
     InvalidTypes,
     InvalidOperationNeg,
+    DivisionByZero,
 }
 
 impl std::fmt::Display for ExpressionError {
@@ -60,6 +81,9 @@ impl std::fmt::Display for ExpressionError {
             }
             ExpressionError::InvalidOperationNeg => {
                 write!(f, "Unsigned expression do not support negation.")
+            }
+            ExpressionError::DivisionByZero => {
+                write!(f, "Division by zero.")
             }
         }
     }

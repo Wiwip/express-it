@@ -27,7 +27,6 @@ macro_rules! impl_float_binary_ops {
     };
 }
 
-
 #[macro_export]
 macro_rules! impl_int_binary_ops {
     (

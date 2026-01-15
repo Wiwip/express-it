@@ -2,9 +2,10 @@ pub mod context;
 pub mod expr;
 pub mod float;
 pub mod integer;
-pub mod macros;
 pub mod logic;
+pub mod macros;
 
+mod num_cast;
 #[cfg(test)]
 mod test_utils;
 
@@ -108,8 +109,6 @@ mod tests {
     const IINT_VAL: i32 = 42;
     const UINT_VAL: u32 = 888;
     const LITERAL_CONSTANT: f32 = 1337.0;
-
-
 
     #[test]
     fn test_int_to_float_conversion() {

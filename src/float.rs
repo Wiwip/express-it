@@ -1,13 +1,11 @@
 use crate::context::{EvalContext, RetrieveAttribute};
 use crate::expr::{Expr, ExprNode, ExpressionError};
 use crate::impl_float_binary_ops;
-use crate::integer::IntExprNode;
-use num_traits::{AsPrimitive, CheckedNeg, Float, Num, PrimInt};
-use std::any::type_name;
-use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
-use std::sync::Arc;
 use crate::logic::{BoolExpr, BoolExprNode, Compare, ComparisonOp};
+use crate::num_cast::CastFrom;
+use num_traits::Float;
+use std::fmt::Debug;
+use std::sync::Arc;
 
 pub type FloatExpr<N, Ctx> = Expr<N, Ctx, FloatExprNode<N, Ctx>>;
 
@@ -72,7 +70,7 @@ where
 }
 
 #[derive(Default)]
-pub enum FloatExprNode<N: Float + Send + Sync, Ctx: EvalContext> {
+pub enum FloatExprNode<N, Ctx> {
     #[default]
     None,
     Lit(N),
@@ -87,7 +85,6 @@ pub enum FloatExprNode<N: Float + Send + Sync, Ctx: EvalContext> {
         op: FloatBinaryOp,
         rhs: FloatExpr<N, Ctx>,
     },
-
 }
 
 impl<N: Float + Send + Sync, Ctx: EvalContext> ExprNode<N, Ctx> for FloatExprNode<N, Ctx> {
@@ -99,32 +96,24 @@ impl<N: Float + Send + Sync, Ctx: EvalContext> ExprNode<N, Ctx> for FloatExprNod
             FloatExprNode::Cast(cast) => Ok(cast.eval(ctx)?),
             FloatExprNode::UnaryOp { op, expr } => {
                 let value = expr.inner.eval(ctx)?;
-                match op {
-                    FloatUnaryOp::Sin => Ok(value.sin()),
-                    FloatUnaryOp::Asin => Ok(value.asin()),
-                    FloatUnaryOp::Cos => Ok(value.cos()),
-                    FloatUnaryOp::Acos => Ok(value.acos()),
-                    FloatUnaryOp::Neg => Ok(value.neg()),
-                }
+                op.eval(value)
             }
             FloatExprNode::BinaryOp { lhs, op, rhs } => {
                 let l = lhs.eval(ctx)?;
                 let r = rhs.eval(ctx)?;
-                match op {
-                    FloatBinaryOp::Add => Ok(l + r),
-                    FloatBinaryOp::Sub => Ok(l - r),
-                    FloatBinaryOp::Mul => Ok(l * r),
-                    FloatBinaryOp::Div => Ok(l / r),
-                    FloatBinaryOp::Rem => Ok(l % r),
-                    FloatBinaryOp::Pow => Ok(l.powf(r)),
-                    //BinaryOp::Log => Ok(l.log(r)),
-                }
+                op.eval(l, r)
             }
         }
     }
 }
 
-impl<N, Ctx> std::ops::Neg for Expr<N, Ctx, FloatExprNode<N, Ctx>>
+impl<N, Ctx> CastFrom<N, Ctx> for FloatExprNode<N, Ctx> {
+    fn cast_from(node: Box<dyn ExprNode<N, Ctx>>) -> Self {
+        FloatExprNode::Cast(node)
+    }
+}
+
+impl<N, Ctx> std::ops::Neg for FloatExpr<N, Ctx>
 where
     N: Float + Send + Sync + 'static,
     Ctx: EvalContext + 'static,
@@ -152,45 +141,6 @@ impl_float_binary_ops!(
     ]
 );
 
-pub struct AsFloat<NOut, NIn: PrimInt + CheckedNeg + Send + Sync, Ctx: EvalContext> {
-    inner: Expr<NIn, Ctx, IntExprNode<NIn, Ctx>>,
-    phantom: PhantomData<NOut>,
-}
-
-impl<NOut, NIn, Ctx: EvalContext> AsFloat<NOut, NIn, Ctx>
-where
-    NIn: PrimInt + CheckedNeg + Send + Sync,
-{
-    pub fn new(inner: Expr<NIn, Ctx, IntExprNode<NIn, Ctx>>) -> Self {
-        Self {
-            inner,
-            phantom: Default::default(),
-        }
-    }
-}
-
-impl<NOut, NIn, Ctx> Debug for AsFloat<NOut, NIn, Ctx>
-where
-    NIn: PrimInt + CheckedNeg + Send + Sync,
-    Ctx: EvalContext,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "AsFloat<{},{}>", type_name::<NOut>(), type_name::<NIn>())
-    }
-}
-
-impl<NIn, NOut, Ctx> ExprNode<NOut, Ctx> for AsFloat<NOut, NIn, Ctx>
-where
-    NIn: PrimInt + CheckedNeg + AsPrimitive<NOut> + Copy + Send + Sync + 'static,
-    NOut: Num + Copy + Send + Sync + 'static,
-    Ctx: EvalContext,
-{
-    fn eval(&self, ctx: &Ctx) -> Result<NOut, ExpressionError> {
-        Ok(self.inner.eval(ctx)?.as_())
-    }
-}
-
-
 #[derive(Debug, Clone, Copy)]
 pub enum FloatUnaryOp {
     Neg,
@@ -198,6 +148,18 @@ pub enum FloatUnaryOp {
     Asin,
     Cos,
     Sin,
+}
+
+impl FloatUnaryOp {
+    fn eval<N: Float>(&self, value: N) -> Result<N, ExpressionError> {
+        match self {
+            FloatUnaryOp::Sin => Ok(value.sin()),
+            FloatUnaryOp::Asin => Ok(value.asin()),
+            FloatUnaryOp::Cos => Ok(value.cos()),
+            FloatUnaryOp::Acos => Ok(value.acos()),
+            FloatUnaryOp::Neg => Ok(value.neg()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -208,4 +170,50 @@ pub enum FloatBinaryOp {
     Div,
     Rem,
     Pow,
+}
+
+impl FloatBinaryOp {
+    fn eval<N: Float>(&self, l: N, r: N) -> Result<N, ExpressionError> {
+        match self {
+            FloatBinaryOp::Add => Ok(l + r),
+            FloatBinaryOp::Sub => Ok(l - r),
+            FloatBinaryOp::Mul => Ok(l * r),
+            FloatBinaryOp::Div => Ok(l / r),
+            FloatBinaryOp::Rem => Ok(l % r),
+            FloatBinaryOp::Pow => Ok(l.powf(r)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_utils::{MapContext, StrAttr, Val};
+
+    #[test]
+    fn test_zero_div() {
+        let mut ctx = MapContext::default();
+
+        ctx.0.insert("zero".into(), Val::Float(0.0));
+        ctx.0.insert("value".into(), Val::Float(100.0));
+
+        let expr = StrAttr::f32("value") / StrAttr::f32("zero");
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, f32::INFINITY);
+    }
+
+    #[test]
+    fn test_cast_op() {
+        let mut ctx = MapContext::default();
+
+        ctx.0.insert("ten".into(), Val::Float(10.0));
+        ctx.0.insert("one_hundred".into(), Val::Int(100));
+
+        let expr = StrAttr::f32("ten") + StrAttr::i32("one_hundred").as_();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 110.0);
+
+        let expr = StrAttr::i32("one_hundred") + StrAttr::f32("ten").as_();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 110);
+    }
 }

@@ -4,11 +4,10 @@ use crate::expr::{Expr, ExprNode, ExpressionError};
 pub type BoolExpr<Ctx> = Expr<bool, Ctx, BoolExprNode<Ctx>>;
 
 #[derive(Default)]
-pub enum BoolExprNode<Ctx: EvalContext> {
+pub enum BoolExprNode<Ctx> {
     #[default]
     None,
     Lit(bool),
-    //Attribute(Box<dyn RetrieveAttribute<N, Ctx>>),
     Boxed(Box<dyn ExprNode<bool, Ctx>>),
     UnaryOp {
         op: LogicUnaryOp,
@@ -67,7 +66,7 @@ impl ComparisonOp {
     }
 }
 
-pub struct Compare<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> {
+pub struct Compare<N, Ctx, Nd> {
     pub lhs: Expr<N, Ctx, Nd>,
     pub op: ComparisonOp,
     pub rhs: Expr<N, Ctx, Nd>,
@@ -97,25 +96,46 @@ pub enum LogicBinaryOp {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::{FloatAttr, MapContext, Val};
-    
+    use crate::test_utils::{MapContext, StrAttr, Val};
+
     #[test]
-    fn test_logic() {
+    fn test_float_logic() {
         let mut ctx = MapContext::default();
 
         ctx.0.insert("small_value".into(), Val::Float(0.1337));
         ctx.0.insert("large_value".into(), Val::Float(18_000.0));
 
-        let expr = FloatAttr::f32("small_value").gt(FloatAttr::f32("large_value"));
-
-        // Wrap it into a BoolExpr
+        let expr = StrAttr::f32("small_value").gt(StrAttr::f32("large_value"));
         let is_greater = expr.eval(&ctx).unwrap();
         assert_eq!(is_greater, 0.1337 > 18_000.0);
 
-        let expr = FloatAttr::f32("small_value").lt(FloatAttr::f32("large_value"));
-
-        // Wrap it into a BoolExpr
+        let expr = StrAttr::f32("small_value").lt(StrAttr::f32("large_value"));
         let is_less = expr.eval(&ctx).unwrap();
         assert_eq!(is_less, 0.1337 < 18_000.0);
+
+        let expr = StrAttr::f32("small_value").eq(StrAttr::f32("small_value"));
+        let is_equal = expr.eval(&ctx).unwrap();
+        assert_eq!(is_equal, 0.1337 == 0.1337);
+    }
+
+    #[test]
+    fn test_int_logic() {
+        let mut ctx = MapContext::default();
+
+        ctx.0.insert("zero".into(), Val::Int(0));
+        ctx.0.insert("small_value".into(), Val::Int(42));
+        ctx.0.insert("large_value".into(), Val::Int(1337));
+
+        let expr = StrAttr::i32("small_value").gt(StrAttr::i32("large_value"));
+        let is_greater = expr.eval(&ctx).unwrap();
+        assert_eq!(is_greater, 0.1337 > 18_000.0);
+
+        let expr = StrAttr::i32("small_value").lt(StrAttr::i32("large_value"));
+        let is_less = expr.eval(&ctx).unwrap();
+        assert_eq!(is_less, 0.1337 < 18_000.0);
+
+        let expr = StrAttr::i32("zero").eq(StrAttr::i32("zero"));
+        let is_equal = expr.eval(&ctx).unwrap();
+        assert_eq!(is_equal, 0.1337 == 0.1337);
     }
 }
