@@ -1,44 +1,44 @@
 use crate::context::EvalContext;
 use crate::expr::{Expr, ExprNode, ExpressionError};
 
-pub type BoolExpr<Ctx> = Expr<bool, Ctx, BoolExprNode<Ctx>>;
+pub type BoolExpr = Expr<bool, BoolExprNode>;
 
 #[derive(Default)]
-pub enum BoolExprNode<Ctx> {
+pub enum BoolExprNode {
     #[default]
     None,
     Lit(bool),
-    Boxed(Box<dyn ExprNode<bool, Ctx>>),
+    Boxed(Box<dyn ExprNode<bool>>),
     UnaryOp {
         op: LogicUnaryOp,
-        expr: BoolExpr<Ctx>,
+        expr: BoolExpr,
     },
     BinaryOp {
-        lhs: BoolExpr<Ctx>,
+        lhs: BoolExpr,
         op: LogicBinaryOp,
-        rhs: BoolExpr<Ctx>,
+        rhs: BoolExpr,
     },
 }
 
-impl<Ctx: EvalContext> ExprNode<bool, Ctx> for BoolExprNode<Ctx> {
-    fn eval(&self, ctx: &Ctx) -> Result<bool, ExpressionError> {
+impl ExprNode<bool> for BoolExprNode {
+    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
         match self {
             BoolExprNode::None => Err(ExpressionError::EmptyExpr),
             BoolExprNode::Lit(lit) => Ok(lit.clone()),
             //BoolExprNode::Attribute(attribute) => Ok(ctx.get(attribute)),
             BoolExprNode::UnaryOp { op, expr } => match op {
-                LogicUnaryOp::Not => Ok(!expr.eval(ctx)?),
+                LogicUnaryOp::Not => Ok(!expr.eval_node(ctx)?),
             },
             BoolExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.eval(ctx)?;
-                let r = rhs.eval(ctx)?;
+                let l = lhs.eval_node(ctx)?;
+                let r = rhs.eval_node(ctx)?;
                 match op {
                     LogicBinaryOp::And => Ok(l && r),
                     LogicBinaryOp::Or => Ok(l || r),
                     LogicBinaryOp::Xor => Ok(l ^ r),
                 }
             }
-            BoolExprNode::Boxed(value) => Ok(value.eval(ctx)?),
+            BoolExprNode::Boxed(value) => Ok(value.eval_node(ctx)?),
         }
     }
 }
@@ -66,18 +66,16 @@ impl ComparisonOp {
     }
 }
 
-pub struct Compare<N, Ctx, Nd> {
-    pub lhs: Expr<N, Ctx, Nd>,
+pub struct Compare<N, Nd> {
+    pub lhs: Expr<N, Nd>,
     pub op: ComparisonOp,
-    pub rhs: Expr<N, Ctx, Nd>,
+    pub rhs: Expr<N, Nd>,
 }
 
-impl<N: PartialOrd + Send + Sync, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> ExprNode<bool, Ctx>
-    for Compare<N, Ctx, Nd>
-{
-    fn eval(&self, ctx: &Ctx) -> Result<bool, ExpressionError> {
-        let l = self.lhs.eval(ctx)?;
-        let r = self.rhs.eval(ctx)?;
+impl<N: PartialOrd + Send + Sync, Nd: ExprNode<N>> ExprNode<bool> for Compare<N, Nd> {
+    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
+        let l = self.lhs.eval_node(ctx)?;
+        let r = self.rhs.eval_node(ctx)?;
         Ok(self.op.compare(&l, &r))
     }
 }

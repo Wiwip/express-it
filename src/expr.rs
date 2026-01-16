@@ -7,19 +7,19 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub trait ExprNode<N, Ctx> {
-    fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError>;
+pub trait ExprNode<N> {
+    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError>;
 }
 
 #[derive(Default, Debug)]
-pub struct Expr<N, Ctx, Nd> {
+pub struct Expr<N, Nd> {
     pub inner: Arc<Nd>,
-    phantom: std::marker::PhantomData<(N, Ctx)>,
+    phantom: std::marker::PhantomData<N>,
 }
 
-impl<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Expr<N, Ctx, Nd> {
-    pub fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
-        self.inner.eval(ctx)
+impl<N, Nd: ExprNode<N>> Expr<N, Nd> {
+    pub fn eval_node(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
+        self.inner.eval_node(ctx)
     }
 
     pub fn new(node: Arc<Nd>) -> Self {
@@ -30,26 +30,29 @@ impl<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Expr<N, Ctx, Nd> {
     }
 }
 
-impl<NIn, Ctx, Nd> Expr<NIn, Ctx, Nd>
+impl<N, Nd> Expr<N, Nd>
 where
-    NIn: Copy + Send + Sync + 'static,
-    Ctx: EvalContext + 'static,
-    Nd: ExprNode<NIn, Ctx> + 'static,
+    N: Copy + Send + Sync + 'static,
+    Nd: ExprNode<N> + 'static,
 {
-    pub fn as_<NOut, NdOut: ExprNode<NOut, Ctx>>(&self) -> Expr<NOut, Ctx, NdOut>
+    pub fn as_<NOut, NdOut: ExprNode<NOut>>(&self) -> Expr<NOut, NdOut>
     where
         NOut: Num + Copy + Send + Sync + 'static,
-        NIn: AsPrimitive<NOut>,
-        NdOut: ExprNode<NOut, Ctx> + CastFrom<NOut, Ctx>,
+        N: AsPrimitive<NOut>,
+        NdOut: ExprNode<NOut> + CastFrom<NOut>,
     {
         let inner = Expr::new(self.inner.clone());
         let cast_node = CastNumPrimitive::new(inner);
         let expr_node = NdOut::cast_from(Box::new(cast_node));
         Expr::new(Arc::new(expr_node))
     }
+
+    pub fn eval<Ctx: EvalContext>(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
+        self.inner.eval_node(ctx)
+    }
 }
 
-impl<N, Ctx: EvalContext, Nd: ExprNode<N, Ctx>> Clone for Expr<N, Ctx, Nd> {
+impl<N, Nd: ExprNode<N>> Clone for Expr<N, Nd> {
     fn clone(&self) -> Self {
         Expr::new(self.inner.clone())
     }
@@ -95,7 +98,7 @@ impl Error for ExpressionError {}
 macro_rules! impl_into_expr {
     // Inner rule for a single implementation
     (@impl $x:ty, $node:ident) => {
-        impl<Ctx: EvalContext> From<$x> for Expr<$x, Ctx, $node<$x, Ctx>> {
+        impl From<$x> for Expr<$x, $node<$x>> {
             fn from(value: $x) -> Self {
                 let value = Arc::new($node::Lit(value));
                 Expr::new(value)
@@ -115,10 +118,10 @@ impl_into_expr!(FloatExprNode: f32, f64);
 
 pub trait SelectExprNodeImpl {
     type Property: Num;
-    type Node<Ctx: EvalContext>: ExprNode<Self::Property, Ctx>;
+    type Node: ExprNode<Self::Property>;
 }
 
-pub type SelectExprNode<T, Ctx> = <T as SelectExprNodeImpl>::Node<Ctx>;
+pub type SelectExprNode<T> = <T as SelectExprNodeImpl>::Node;
 
 #[macro_export]
 macro_rules! impl_select_expr {
@@ -126,7 +129,7 @@ macro_rules! impl_select_expr {
     (@impl $x:ty, $select:ident) => {
         impl SelectExprNodeImpl for $x {
             type Property = $x;
-            type Node<Ctx: EvalContext> = $select<Self::Property, Ctx>;
+            type Node = $select<Self::Property>;
         }
     };
     // Batch rule for multiple types mapping to the same Node
@@ -143,11 +146,10 @@ impl_select_expr!(FloatExprNode: f32, f64);
 macro_rules! impl_math_ops {
         ($($trait:ident => $method:ident),*,) => {
             $(
-                impl<N, Ctx> std::ops::$trait<N> for Expr<N, Ctx, SelectExprNode<N, Ctx>>
+                impl<N> std::ops::$trait<N> for Expr<N, SelectExprNode<N>>
                 where
                     N: Num + SelectExprNodeImpl<Property = N>,
-                    Ctx: EvalContext,
-                    SelectExprNode<N, Ctx>: ExprNode<N, Ctx>,
+                    SelectExprNode<N>: ExprNode<N>,
                     Self: std::ops::$trait<Self, Output = Self> + From<N>,
                 {
                     type Output = Self;
