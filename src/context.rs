@@ -1,11 +1,12 @@
 use crate::expr::ExpressionError;
-use num_traits::Num;
 use std::fmt::Debug;
 
 pub trait EvalContext: Send + Sync {
-    fn get<N: Num>(&self, attribute: &Box<dyn RetrieveAttribute<N, Self>>) -> N;
+    //fn get<N: Num>(&self, attribute: &Box<dyn RetrieveAttribute<N>>) -> N;
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
-pub trait RetrieveAttribute<N, Ctx: EvalContext>: Debug + Send + Sync {
-    fn retrieve(&self, ctx: &Ctx) -> Result<N, ExpressionError>;
+pub trait RetrieveAttribute<N>: Debug + Send + Sync {
+    //fn retrieve(&self) -> Result<N, ExpressionError>;
+    fn retrieve(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError>;
 }

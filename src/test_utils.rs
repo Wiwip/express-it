@@ -2,7 +2,8 @@ use crate::context::{EvalContext, RetrieveAttribute};
 use crate::expr::{Expr, ExprNode, ExpressionError};
 use crate::float::{FloatExpr, FloatExprNode};
 use crate::integer::{IntExpr, IntExprNode};
-use num_traits::{AsPrimitive, Num};
+use num_traits::AsPrimitive;
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -40,10 +41,8 @@ impl MapContext {
 }
 
 impl EvalContext for MapContext {
-    fn get<N: Num>(&self, attribute: &Box<dyn RetrieveAttribute<N, Self>>) -> N {
-        attribute
-            .retrieve(self)
-            .expect("Attribute retrieval failed")
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -51,37 +50,45 @@ impl EvalContext for MapContext {
 pub struct StrAttr(pub String);
 
 impl StrAttr {
-    pub fn f32(val: &str) -> FloatExpr<f32, MapContext> {
+    pub fn f32(val: &str) -> FloatExpr<f32> {
         let expr = FloatExprNode::Attribute(Box::new(StrAttr(val.into())));
         Expr::new(Arc::new(expr))
     }
 
-    pub fn i32(val: &str) -> IntExpr<i32, MapContext> {
+    pub fn i32(val: &str) -> IntExpr<i32> {
         let expr = IntExprNode::Attribute(Box::new(StrAttr(val.into())));
         Expr::new(Arc::new(expr))
     }
 }
 
-impl ExprNode<f32, MapContext> for StrAttr {
-    fn eval(&self, ctx: &MapContext) -> Result<f32, ExpressionError> {
+impl ExprNode<f32> for StrAttr {
+    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<f32, ExpressionError> {
         Ok(self.retrieve(ctx)?)
     }
 }
 
-impl ExprNode<i32, MapContext> for StrAttr {
-    fn eval(&self, ctx: &MapContext) -> Result<i32, ExpressionError> {
+impl ExprNode<i32> for StrAttr {
+    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<i32, ExpressionError> {
         Ok(self.retrieve(ctx)?)
     }
 }
 
-impl RetrieveAttribute<f32, MapContext> for StrAttr {
-    fn retrieve(&self, ctx: &MapContext) -> Result<f32, ExpressionError> {
-        ctx.get_value(&self.0)?.cast_to::<f32>()
+impl RetrieveAttribute<f32> for StrAttr {
+    fn retrieve(&self, ctx: &dyn EvalContext) -> Result<f32, ExpressionError> {
+        let game_ctx = ctx.as_any()
+            .downcast_ref::<MapContext>()
+            .ok_or(ExpressionError::InvalidTypes)?;
+
+        game_ctx.get_value(&self.0)?.cast_to::<f32>()
     }
 }
 
-impl RetrieveAttribute<i32, MapContext> for StrAttr {
-    fn retrieve(&self, ctx: &MapContext) -> Result<i32, ExpressionError> {
-        ctx.get_value(&self.0)?.cast_to::<i32>()
+impl RetrieveAttribute<i32> for StrAttr {
+    fn retrieve(&self, ctx: &dyn EvalContext) -> Result<i32, ExpressionError> {
+        let game_ctx = ctx.as_any()
+            .downcast_ref::<MapContext>()
+            .ok_or(ExpressionError::InvalidTypes)?;
+
+        game_ctx.get_value(&self.0)?.cast_to::<i32>()
     }
 }

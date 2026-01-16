@@ -6,14 +6,13 @@ use crate::num_cast::CastFrom;
 use num_traits::{AsPrimitive, CheckedNeg, PrimInt};
 use std::sync::Arc;
 
-pub type IntExpr<N, Ctx> = Expr<N, Ctx, IntExprNode<N, Ctx>>;
+pub type IntExpr<N> = Expr<N, IntExprNode<N>>;
 
-impl<N, Ctx> IntExpr<N, Ctx>
+impl<N> IntExpr<N>
 where
     N: PrimInt + CheckedNeg + Send + Sync + 'static,
-    Ctx: EvalContext + 'static,
 {
-    pub fn gt(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn gt(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Gt,
@@ -22,7 +21,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn ge(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn ge(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Ge,
@@ -31,7 +30,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn lt(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn lt(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Lt,
@@ -40,7 +39,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn le(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn le(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Le,
@@ -49,7 +48,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn eq(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn eq(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Eq,
@@ -58,7 +57,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn ne(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn ne(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Ne,
@@ -69,59 +68,57 @@ where
 }
 
 #[derive(Default)]
-pub enum IntExprNode<N, Ctx: EvalContext> {
+pub enum IntExprNode<N> {
     #[default]
     None,
     Lit(N),
-    Attribute(Box<dyn RetrieveAttribute<N, Ctx>>),
-    Cast(Box<dyn ExprNode<N, Ctx>>),
+    Attribute(Box<dyn RetrieveAttribute<N>>),
+    Cast(Box<dyn ExprNode<N>>),
     UnaryOp {
         op: IntUnaryOp,
-        expr: IntExpr<N, Ctx>,
+        expr: IntExpr<N>,
     },
     BinaryOp {
-        lhs: IntExpr<N, Ctx>,
+        lhs: IntExpr<N>,
         op: IntBinaryOp,
-        rhs: IntExpr<N, Ctx>,
+        rhs: IntExpr<N>,
     },
 }
 
-impl<N, Ctx> ExprNode<N, Ctx> for IntExprNode<N, Ctx>
+impl<N> ExprNode<N> for IntExprNode<N>
 where
-    N: PrimInt + CheckedNeg + Send + Sync,
-    Ctx: EvalContext,
+    N: PrimInt + CheckedNeg + Send + Sync + 'static,
 {
-    fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
+    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
         match self {
             IntExprNode::None => Err(ExpressionError::EmptyExpr),
             IntExprNode::Lit(lit) => Ok(lit.clone()),
-            IntExprNode::Attribute(attribute) => Ok(ctx.get(attribute)),
-            IntExprNode::Cast(cast) => Ok(cast.eval(ctx)?),
+            IntExprNode::Attribute(attribute) => Ok(attribute.retrieve(ctx)?),
+            IntExprNode::Cast(cast) => Ok(cast.eval_node(ctx)?),
             IntExprNode::UnaryOp { op, expr } => match op {
                 IntUnaryOp::Neg => expr
-                    .eval(ctx)?
+                    .eval_dyn(ctx)?
                     .checked_neg()
                     .ok_or(ExpressionError::InvalidOperationNeg),
             },
             IntExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.eval(ctx)?;
-                let r = rhs.eval(ctx)?;
+                let l = lhs.eval_dyn(ctx)?;
+                let r = rhs.eval_dyn(ctx)?;
                 op.eval(l, r)
             }
         }
     }
 }
 
-impl<N, Ctx: EvalContext> CastFrom<N, Ctx> for IntExprNode<N, Ctx> {
-    fn cast_from(node: Box<dyn ExprNode<N, Ctx>>) -> Self {
+impl<N> CastFrom<N> for IntExprNode<N> {
+    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self {
         IntExprNode::Cast(node)
     }
 }
 
-impl<N, Ctx> std::ops::Neg for Expr<N, Ctx, IntExprNode<N, Ctx>>
+impl<N> std::ops::Neg for Expr<N, IntExprNode<N>>
 where
     N: PrimInt + CheckedNeg + Send + Sync + 'static,
-    Ctx: EvalContext + 'static,
 {
     type Output = Self;
 

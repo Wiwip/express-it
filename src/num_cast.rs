@@ -5,23 +5,22 @@ use std::any::type_name;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
-pub trait CastFrom<N, Ctx>: Sized {
-    fn cast_from(node: Box<dyn ExprNode<N, Ctx>>) -> Self;
+pub trait CastFrom<N>: Sized {
+    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self;
 }
 
-pub struct CastNumPrimitive<NOut, NIn, Ctx: EvalContext, Nd: ExprNode<NIn, Ctx>> {
-    inner: Expr<NIn, Ctx, Nd>,
+pub struct CastNumPrimitive<NOut, NIn, Nd: ExprNode<NIn>> {
+    inner: Expr<NIn, Nd>,
     phantom: PhantomData<NOut>,
 }
 
-impl<NOut, NIn, Ctx, Nd> CastNumPrimitive<NOut, NIn, Ctx, Nd>
+impl<NOut, NIn, Nd> CastNumPrimitive<NOut, NIn, Nd>
 where
     NOut: Copy + Send + Sync + 'static,
     NIn: AsPrimitive<NOut> + Copy + Send + Sync,
-    Ctx: EvalContext,
-    Nd: ExprNode<NIn, Ctx>,
+    Nd: ExprNode<NIn>,
 {
-    pub fn new(inner: Expr<NIn, Ctx, Nd>) -> Self {
+    pub fn new(inner: Expr<NIn, Nd>) -> Self {
         Self {
             inner,
             phantom: Default::default(),
@@ -29,24 +28,22 @@ where
     }
 }
 
-impl<NOut, NIn, Ctx, Nd> Debug for CastNumPrimitive<NOut, NIn, Ctx, Nd>
+impl<NOut, NIn, Nd> Debug for CastNumPrimitive<NOut, NIn, Nd>
 where
-    Ctx: EvalContext,
-    Nd: ExprNode<NIn, Ctx>,
+    Nd: ExprNode<NIn>,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "AsFloat<{},{}>", type_name::<NOut>(), type_name::<NIn>())
     }
 }
 
-impl<NIn, NOut, Ctx, Nd> ExprNode<NOut, Ctx> for CastNumPrimitive<NOut, NIn, Ctx, Nd>
+impl<NIn, NOut, Nd> ExprNode<NOut> for CastNumPrimitive<NOut, NIn, Nd>
 where
     NIn: AsPrimitive<NOut> + Copy + Send + Sync + 'static,
     NOut: Num + Copy + Send + Sync + 'static,
-    Ctx: EvalContext,
-    Nd: ExprNode<NIn, Ctx>,
+    Nd: ExprNode<NIn> + 'static,
 {
-    fn eval(&self, ctx: &Ctx) -> Result<NOut, ExpressionError> {
-        Ok(self.inner.eval(ctx)?.as_())
+    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<NOut, ExpressionError> {
+        Ok(self.inner.eval_dyn(ctx)?.as_())
     }
 }

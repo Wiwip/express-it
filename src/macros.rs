@@ -7,11 +7,10 @@ macro_rules! impl_float_binary_ops {
         [$($trait:ident => ($method:ident, $variant:ident)),* $(,)?]
     ) => {
         $(
-            impl<N, Ctx> std::ops::$trait for Expr<N, Ctx, $target<N, Ctx>>
+            impl<N> std::ops::$trait for Expr<N, $target<N>>
             where
                 N: Float + Send + Sync,
-                Ctx: crate::context::EvalContext,
-                $target<N, Ctx>: crate::expr::ExprNode<N, Ctx>,
+                $target<N>: crate::expr::ExprNode<N>,
             {
                 type Output = Self;
 
@@ -36,11 +35,10 @@ macro_rules! impl_int_binary_ops {
         [$($trait:ident => ($method:ident, $variant:ident)),* $(,)?]
     ) => {
         $(
-            impl<N, Ctx> std::ops::$trait for Expr<N, Ctx, $target<N, Ctx>>
+            impl<N> std::ops::$trait for Expr<N, $target<N>>
             where
                 N: PrimInt + CheckedNeg + AsPrimitive<u32> + Send + Sync,
-                Ctx: crate::context::EvalContext,
-                $target<N, Ctx>: crate::expr::ExprNode<N, Ctx>,
+                $target<N>: crate::expr::ExprNode<N>,
             {
                 type Output = Self;
 

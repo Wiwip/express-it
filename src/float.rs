@@ -7,14 +7,13 @@ use num_traits::Float;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub type FloatExpr<N, Ctx> = Expr<N, Ctx, FloatExprNode<N, Ctx>>;
+pub type FloatExpr<N> = Expr<N, FloatExprNode<N>>;
 
-impl<N, Ctx> FloatExpr<N, Ctx>
+impl<N> FloatExpr<N>
 where
     N: Float + Send + Sync + 'static,
-    Ctx: EvalContext + 'static,
 {
-    pub fn gt(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn gt(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Gt,
@@ -23,7 +22,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn ge(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn ge(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Ge,
@@ -32,7 +31,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn lt(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn lt(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Lt,
@@ -41,7 +40,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn le(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn le(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Le,
@@ -50,7 +49,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn eq(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn eq(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Eq,
@@ -59,7 +58,7 @@ where
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
     }
 
-    pub fn ne(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
+    pub fn ne(self, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
             op: ComparisonOp::Ne,
@@ -70,53 +69,52 @@ where
 }
 
 #[derive(Default)]
-pub enum FloatExprNode<N, Ctx> {
+pub enum FloatExprNode<N> {
     #[default]
     None,
     Lit(N),
-    Attribute(Box<dyn RetrieveAttribute<N, Ctx>>),
-    Cast(Box<dyn ExprNode<N, Ctx>>),
+    Attribute(Box<dyn RetrieveAttribute<N>>),
+    Cast(Box<dyn ExprNode<N>>),
     UnaryOp {
         op: FloatUnaryOp,
-        expr: FloatExpr<N, Ctx>,
+        expr: FloatExpr<N>,
     },
     BinaryOp {
-        lhs: FloatExpr<N, Ctx>,
+        lhs: FloatExpr<N>,
         op: FloatBinaryOp,
-        rhs: FloatExpr<N, Ctx>,
+        rhs: FloatExpr<N>,
     },
 }
 
-impl<N: Float + Send + Sync, Ctx: EvalContext> ExprNode<N, Ctx> for FloatExprNode<N, Ctx> {
-    fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
+impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
+    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
         match self {
             FloatExprNode::None => Err(ExpressionError::EmptyExpr),
             FloatExprNode::Lit(lit) => Ok(lit.clone()),
-            FloatExprNode::Attribute(attribute) => Ok(ctx.get(attribute)),
-            FloatExprNode::Cast(cast) => Ok(cast.eval(ctx)?),
+            FloatExprNode::Attribute(attribute) => Ok(attribute.retrieve(ctx)?),
+            FloatExprNode::Cast(cast) => Ok(cast.eval_node(ctx)?),
             FloatExprNode::UnaryOp { op, expr } => {
-                let value = expr.inner.eval(ctx)?;
+                let value = expr.inner.eval_node(ctx)?;
                 op.eval(value)
             }
             FloatExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.eval(ctx)?;
-                let r = rhs.eval(ctx)?;
+                let l = lhs.eval_dyn(ctx)?;
+                let r = rhs.eval_dyn(ctx)?;
                 op.eval(l, r)
             }
         }
     }
 }
 
-impl<N, Ctx> CastFrom<N, Ctx> for FloatExprNode<N, Ctx> {
-    fn cast_from(node: Box<dyn ExprNode<N, Ctx>>) -> Self {
+impl<N> CastFrom<N> for FloatExprNode<N> {
+    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self {
         FloatExprNode::Cast(node)
     }
 }
 
-impl<N, Ctx> std::ops::Neg for FloatExpr<N, Ctx>
+impl<N> std::ops::Neg for FloatExpr<N>
 where
     N: Float + Send + Sync + 'static,
-    Ctx: EvalContext + 'static,
 {
     type Output = Self;
 
