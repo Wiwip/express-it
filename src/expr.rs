@@ -37,8 +37,7 @@ where
         N: AsPrimitive<NOut>,
         NdOut: ExprNode<NOut> + CastFrom<NOut>,
     {
-        let inner = Expr::new(self.inner.clone());
-        let cast_node = CastNumPrimitive::new(inner);
+        let cast_node = CastNumPrimitive::new(self.clone());
         let expr_node = NdOut::cast_from(Box::new(cast_node));
         Expr::new(Arc::new(expr_node))
     }
