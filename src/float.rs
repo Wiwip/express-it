@@ -73,8 +73,8 @@ pub enum FloatExprNode<N> {
     #[default]
     None,
     Lit(N),
-    Attribute(Box<dyn RetrieveAttribute<N>>),
-    Cast(Box<dyn ExprNode<N>>),
+    Attribute(Box<dyn RetrieveAttribute<N> + Send + Sync>),
+    Cast(Box<dyn ExprNode<N> + Send + Sync>),
     UnaryOp {
         op: FloatUnaryOp,
         expr: FloatExpr<N>,
@@ -106,8 +106,8 @@ impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
     }
 }
 
-impl<N> CastFrom<N> for FloatExprNode<N> {
-    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self {
+impl<N: Send + Sync> CastFrom<N> for FloatExprNode<N> {
+    fn cast_from(node: Box<dyn ExprNode<N> + Send + Sync>) -> Self {
         FloatExprNode::Cast(node)
     }
 }

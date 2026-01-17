@@ -29,7 +29,7 @@ impl<N, Nd: ExprNode<N>> Expr<N, Nd> {
 impl<N, Nd> Expr<N, Nd>
 where
     N: Copy + Send + Sync + 'static,
-    Nd: ExprNode<N> + 'static,
+    Nd: ExprNode<N> + Send + Sync + 'static,
 {
     pub fn as_<NOut, NdOut: ExprNode<NOut>>(&self) -> Expr<NOut, NdOut>
     where

@@ -72,8 +72,8 @@ pub enum IntExprNode<N> {
     #[default]
     None,
     Lit(N),
-    Attribute(Box<dyn RetrieveAttribute<N>>),
-    Cast(Box<dyn ExprNode<N>>),
+    Attribute(Box<dyn RetrieveAttribute<N> + Send + Sync>),
+    Cast(Box<dyn ExprNode<N> + Send + Sync>),
     UnaryOp {
         op: IntUnaryOp,
         expr: IntExpr<N>,
@@ -111,7 +111,7 @@ where
 }
 
 impl<N> CastFrom<N> for IntExprNode<N> {
-    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self {
+    fn cast_from(node: Box<dyn ExprNode<N> + Send + Sync>) -> Self {
         IntExprNode::Cast(node)
     }
 }

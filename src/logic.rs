@@ -8,7 +8,7 @@ pub enum BoolExprNode {
     #[default]
     None,
     Lit(bool),
-    Boxed(Box<dyn ExprNode<bool>>),
+    Boxed(Box<dyn ExprNode<bool> + Send + Sync>),
     UnaryOp {
         op: LogicUnaryOp,
         expr: BoolExpr,
@@ -75,7 +75,7 @@ pub struct Compare<N, Nd> {
 impl<N, Nd> ExprNode<bool> for Compare<N, Nd>
 where
     N: PartialOrd + Copy + Send + Sync + 'static,
-    Nd: ExprNode<N> + 'static,
+    Nd: ExprNode<N> + Send + Sync + 'static,
 {
     fn eval_node(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
         let l = self.lhs.eval_dyn(ctx)?;

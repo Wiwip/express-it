@@ -6,7 +6,7 @@ use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
 pub trait CastFrom<N>: Sized {
-    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self;
+    fn cast_from(node: Box<dyn ExprNode<N> + Send + Sync>) -> Self;
 }
 
 pub struct CastNumPrimitive<NOut, NIn, Nd: ExprNode<NIn>> {
@@ -41,7 +41,7 @@ impl<NIn, NOut, Nd> ExprNode<NOut> for CastNumPrimitive<NOut, NIn, Nd>
 where
     NIn: AsPrimitive<NOut> + Copy + Send + Sync + 'static,
     NOut: Num + Copy + Send + Sync + 'static,
-    Nd: ExprNode<NIn> + 'static,
+    Nd: ExprNode<NIn> + Send + Sync + 'static,
 {
     fn eval_node(&self, ctx: &dyn EvalContext) -> Result<NOut, ExpressionError> {
         Ok(self.inner.eval_dyn(ctx)?.as_())
