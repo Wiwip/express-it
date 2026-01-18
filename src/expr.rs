@@ -64,6 +64,7 @@ pub enum ExpressionError {
     InvalidTypes,
     InvalidOperationNeg,
     DivisionByZero,
+    DowncastError,
 }
 
 impl std::fmt::Display for ExpressionError {
@@ -86,6 +87,9 @@ impl std::fmt::Display for ExpressionError {
             }
             ExpressionError::DivisionByZero => {
                 write!(f, "Division by zero.")
+            }
+            ExpressionError::DowncastError => {
+                write!(f, "Failed to downcast expression.")
             }
         }
     }

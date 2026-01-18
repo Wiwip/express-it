@@ -6,6 +6,5 @@ pub mod logic;
 pub mod macros;
 
 mod num_cast;
-#[cfg(test)]
 mod test_utils;
 

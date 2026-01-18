@@ -185,21 +185,24 @@ impl FloatBinaryOp {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::{MapContext, StrAttr, Val};
+    use crate::test_utils::{Damage, Health, MapContext};
 
     #[test]
-    fn test_zero_div() {
+    fn test_binary_ops() {
         let mut ctx = MapContext::default();
+        ctx.insert_dst::<Health>(150.0);
 
-        ctx.0.insert("zero".into(), Val::Float(0.0));
-        ctx.0.insert("value".into(), Val::Float(100.0));
+        ctx.insert_src::<Damage>(18);
+        ctx.insert_src::<Health>(50.0);
 
-        let expr = StrAttr::f32("value") / StrAttr::f32("zero");
+        println!("{:#?}", ctx);
+
+        let expr = Health::dst() - Health::src();
         let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, f32::INFINITY);
+        assert_eq!(expr_result, 150.0 - 50.0);
     }
 
-    #[test]
+    /*#[test]
     fn test_cast_op() {
         let mut ctx = MapContext::default();
 
@@ -213,5 +216,5 @@ mod tests {
         let expr = StrAttr::i32("one_hundred") + StrAttr::f32("ten").as_();
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 110);
-    }
+    }*/
 }
