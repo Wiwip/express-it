@@ -45,7 +45,7 @@ where
     pub fn eval<Ctx: EvalContext>(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
         self.inner.eval_node(ctx)
     }
-    
+
     pub fn eval_dyn(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
         self.inner.eval_node(ctx)
     }
@@ -59,25 +59,19 @@ impl<N, Nd: ExprNode<N>> Clone for Expr<N, Nd> {
 
 #[derive(Debug, PartialEq)]
 pub enum ExpressionError {
-    AttributeNotFound,
-    EmptyExpr,
+    MissingAttribute,
     InvalidTypes,
     InvalidOperationNeg,
     DivisionByZero,
     DowncastError,
+    FailedReflect(String),
 }
 
 impl std::fmt::Display for ExpressionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExpressionError::AttributeNotFound => {
-                write!(
-                    f,
-                    "Attribute error: Failed to retrieve attribute from context"
-                )
-            }
-            ExpressionError::EmptyExpr => {
-                write!(f, "An Empty Expression was found.")
+            ExpressionError::MissingAttribute => {
+                write!(f, "Failed to retrieve attribute from context.")
             }
             ExpressionError::InvalidTypes => {
                 write!(f, "Invalid expression type.")
@@ -90,6 +84,9 @@ impl std::fmt::Display for ExpressionError {
             }
             ExpressionError::DowncastError => {
                 write!(f, "Failed to downcast expression.")
+            }
+            ExpressionError::FailedReflect(msg) => {
+                write!(f, "Failed to reflect expression. Error: {}", msg)
             }
         }
     }

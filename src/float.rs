@@ -68,10 +68,7 @@ where
     }
 }
 
-#[derive(Default)]
 pub enum FloatExprNode<N> {
-    #[default]
-    None,
     Lit(N),
     Attribute(Box<dyn RetrieveAttribute<N> + Send + Sync>),
     Cast(Box<dyn ExprNode<N> + Send + Sync>),
@@ -89,7 +86,6 @@ pub enum FloatExprNode<N> {
 impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
     fn eval_node(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
         match self {
-            FloatExprNode::None => Err(ExpressionError::EmptyExpr),
             FloatExprNode::Lit(lit) => Ok(lit.clone()),
             FloatExprNode::Attribute(attribute) => Ok(attribute.retrieve(ctx)?),
             FloatExprNode::Cast(cast) => Ok(cast.eval_node(ctx)?),
@@ -185,36 +181,76 @@ impl FloatBinaryOp {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::{Damage, Health, MapContext};
+    use crate::expr::ExpressionError;
+    use crate::test_utils::{I32Attribute, F32Attribute, MapContext};
+    use std::ops::Neg;
+
+    #[test]
+    fn test_unary_ops() {
+        let mut ctx = MapContext::default();
+        // Destination
+        ctx.insert_dst::<F32Attribute>(150.0);
+
+        let expr = F32Attribute::dst().neg();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, -150.0);
+    }
 
     #[test]
     fn test_binary_ops() {
         let mut ctx = MapContext::default();
-        ctx.insert_dst::<Health>(150.0);
+        // Destination
+        ctx.insert_dst::<F32Attribute>(150.0);
 
-        ctx.insert_src::<Damage>(18);
-        ctx.insert_src::<Health>(50.0);
+        // Source
+        ctx.insert_src::<F32Attribute>(50.0);
 
-        println!("{:#?}", ctx);
-
-        let expr = Health::dst() - Health::src();
+        let expr = F32Attribute::dst() - F32Attribute::src();
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 150.0 - 50.0);
+
+        let expr = F32Attribute::dst() + F32Attribute::src();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 150.0 + 50.0);
+
+        let expr = F32Attribute::dst() * F32Attribute::src();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 150.0 * 50.0);
+
+        let expr = F32Attribute::dst() / F32Attribute::src();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 150.0 / 50.0);
     }
 
-    /*#[test]
+    #[test]
     fn test_cast_op() {
         let mut ctx = MapContext::default();
+        // Source
+        ctx.insert_src::<I32Attribute>(49);
+        ctx.insert_src::<F32Attribute>(1500.0);
 
-        ctx.0.insert("ten".into(), Val::Float(10.0));
-        ctx.0.insert("one_hundred".into(), Val::Int(100));
-
-        let expr = StrAttr::f32("ten") + StrAttr::i32("one_hundred").as_();
+        let expr = F32Attribute::src() + I32Attribute::src().as_();
         let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 110.0);
+        assert_eq!(expr_result, 1500.0 + 49.0);
 
-        let expr = StrAttr::i32("one_hundred") + StrAttr::f32("ten").as_();
+        let expr = F32Attribute::src() - I32Attribute::src().as_();
         let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 110);
-    }*/
+        assert_eq!(expr_result, 1500.0 - 49.0);
+    }
+
+    #[test]
+    fn test_error_ops() {
+        let mut ctx = MapContext::default();
+        // Source
+        ctx.insert_src::<I32Attribute>(0);
+        ctx.insert_src::<F32Attribute>(1500.0);
+
+        let expr = F32Attribute::src() / I32Attribute::src().as_();
+        let expr_result = expr.eval(&ctx);
+        assert_eq!(expr_result, Ok(f32::INFINITY));
+
+        let expr = F32Attribute::dst();
+        let expr_result = expr.eval(&ctx);
+        assert_eq!(expr_result, Err(ExpressionError::MissingAttribute));
+    }
 }

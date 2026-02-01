@@ -67,10 +67,7 @@ where
     }
 }
 
-#[derive(Default)]
 pub enum IntExprNode<N> {
-    #[default]
-    None,
     Lit(N),
     Attribute(Box<dyn RetrieveAttribute<N> + Send + Sync>),
     Cast(Box<dyn ExprNode<N> + Send + Sync>),
@@ -91,7 +88,6 @@ where
 {
     fn eval_node(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
         match self {
-            IntExprNode::None => Err(ExpressionError::EmptyExpr),
             IntExprNode::Lit(lit) => Ok(lit.clone()),
             IntExprNode::Attribute(attribute) => Ok(attribute.retrieve(ctx)?),
             IntExprNode::Cast(cast) => Ok(cast.eval_node(ctx)?),
@@ -171,25 +167,77 @@ impl IntBinaryOp {
     }
 }
 
-/*
+
 #[cfg(test)]
 mod tests {
     use crate::expr::ExpressionError;
-    use crate::test_utils::{MapContext, StrAttr, Val};
+    use crate::test_utils::{F32Attribute, I32Attribute, MapContext};
+    use std::ops::Neg;
 
     #[test]
-    fn test_zero_div() {
+    fn test_unary_ops() {
         let mut ctx = MapContext::default();
+        // Destination
+        ctx.insert_dst::<I32Attribute>(150);
 
-        ctx.0.insert("zero".into(), Val::Int(0));
-        ctx.0.insert("value".into(), Val::Int(100));
-
-        let expr = StrAttr::i32("value") / StrAttr::i32("zero");
-        let expr_result = expr.eval(&ctx);
-        assert_eq!(expr_result, Err(ExpressionError::DivisionByZero));
+        let expr = I32Attribute::dst().neg();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, -150);
     }
 
     #[test]
-    fn test_int_binary_op() {}
+    fn test_binary_ops() {
+        let mut ctx = MapContext::default();
+        // Destination
+        ctx.insert_dst::<I32Attribute>(150);
+        // Source
+        ctx.insert_src::<I32Attribute>(50);
+
+        let expr = I32Attribute::dst() - I32Attribute::src();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 150 - 50);
+
+        let expr = I32Attribute::dst() + I32Attribute::src();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 150 + 50);
+
+        let expr = I32Attribute::dst() * I32Attribute::src();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 150 * 50);
+
+        let expr = I32Attribute::dst() / I32Attribute::src();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 150 / 50);
+    }
+
+    #[test]
+    fn test_cast_op() {
+        let mut ctx = MapContext::default();
+        // Source
+        ctx.insert_src::<F32Attribute>(49.0);
+        ctx.insert_src::<I32Attribute>(1500);
+
+        let expr = I32Attribute::src() + F32Attribute::src().as_();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 1500 + 49);
+
+        let expr = I32Attribute::src() - F32Attribute::src().as_();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 1500 - 49);
+    }
+
+    #[test]
+    fn test_error_ops() {
+        let mut ctx = MapContext::default();
+        ctx.insert_src::<I32Attribute>(1500);
+        ctx.insert_dst::<I32Attribute>(0);
+
+        let expr = I32Attribute::src() / I32Attribute::dst();
+        let expr_result = expr.eval(&ctx);
+        assert_eq!(expr_result, Err(ExpressionError::DivisionByZero));
+
+        let expr = F32Attribute::dst();
+        let expr_result = expr.eval(&ctx);
+        assert_eq!(expr_result, Err(ExpressionError::MissingAttribute));
+    }
 }
-*/

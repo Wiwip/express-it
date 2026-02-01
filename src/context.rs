@@ -11,7 +11,6 @@ pub trait EvalContext {
 }
 
 pub trait RetrieveAttribute<N>: Debug + Send + Sync {
-    //fn retrieve(&self) -> Result<N, ExpressionError>;
     fn retrieve(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError>;
 }
 

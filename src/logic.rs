@@ -3,10 +3,7 @@ use crate::expr::{Expr, ExprNode, ExpressionError};
 
 pub type BoolExpr = Expr<bool, BoolExprNode>;
 
-#[derive(Default)]
 pub enum BoolExprNode {
-    #[default]
-    None,
     Lit(bool),
     Boxed(Box<dyn ExprNode<bool> + Send + Sync>),
     UnaryOp {
@@ -23,8 +20,8 @@ pub enum BoolExprNode {
 impl ExprNode<bool> for BoolExprNode {
     fn eval_node(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
         match self {
-            BoolExprNode::None => Err(ExpressionError::EmptyExpr),
             BoolExprNode::Lit(lit) => Ok(lit.clone()),
+            BoolExprNode::Boxed(value) => Ok(value.eval_node(ctx)?),
             //BoolExprNode::Attribute(attribute) => Ok(ctx.get(attribute)),
             BoolExprNode::UnaryOp { op, expr } => match op {
                 LogicUnaryOp::Not => Ok(!expr.eval_dyn(ctx)?),
@@ -38,7 +35,6 @@ impl ExprNode<bool> for BoolExprNode {
                     LogicBinaryOp::Xor => Ok(l ^ r),
                 }
             }
-            BoolExprNode::Boxed(value) => Ok(value.eval_node(ctx)?),
         }
     }
 }
@@ -95,50 +91,48 @@ pub enum LogicBinaryOp {
     Or,
     Xor,
 }
-/*
+
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::{MapContext, SrcAttr, Val};
+    use crate::test_utils::{F32Attribute, I32Attribute, MapContext};
 
     #[test]
     fn test_float_logic() {
         let mut ctx = MapContext::default();
+        ctx.insert_src::<F32Attribute>(1500.0);
+        ctx.insert_dst::<F32Attribute>(0.0);
+        ctx.insert_dst::<I32Attribute>(0);
 
-        ctx.0.insert("small_value".into(), Val::Float(0.1337));
-        ctx.0.insert("large_value".into(), Val::Float(18_000.0));
-
-        let expr = SrcAttr::f32("small_value").gt(SrcAttr::f32("large_value"));
+        let expr = F32Attribute::src().gt(F32Attribute::dst());
         let is_greater = expr.eval(&ctx).unwrap();
-        assert_eq!(is_greater, 0.1337 > 18_000.0);
+        assert_eq!(is_greater, 1500 > 0);
 
-        let expr = SrcAttr::f32("small_value").lt(SrcAttr::f32("large_value"));
-        let is_less = expr.eval(&ctx).unwrap();
-        assert_eq!(is_less, 0.1337 < 18_000.0);
+        let expr = F32Attribute::dst().lt(F32Attribute::src());
+        let is_lower = expr.eval(&ctx).unwrap();
+        assert_eq!(is_lower, 0 < 1500);
 
-        let expr = SrcAttr::f32("small_value").eq(SrcAttr::f32("small_value"));
+        let expr = F32Attribute::dst().eq(I32Attribute::dst().as_());
         let is_equal = expr.eval(&ctx).unwrap();
-        assert_eq!(is_equal, 0.1337 == 0.1337);
+        assert_eq!(is_equal, true);
     }
 
     #[test]
     fn test_int_logic() {
         let mut ctx = MapContext::default();
+        ctx.insert_src::<I32Attribute>(1500);
+        ctx.insert_dst::<I32Attribute>(0);
+        ctx.insert_dst::<F32Attribute>(0.0);
 
-        ctx.0.insert("zero".into(), Val::Int(0));
-        ctx.0.insert("small_value".into(), Val::Int(42));
-        ctx.0.insert("large_value".into(), Val::Int(1337));
-
-        let expr = SrcAttr::i32("small_value").gt(SrcAttr::i32("large_value"));
+        let expr = I32Attribute::src().gt(I32Attribute::dst());
         let is_greater = expr.eval(&ctx).unwrap();
-        assert_eq!(is_greater, 0.1337 > 18_000.0);
+        assert_eq!(is_greater, 1500 > 0);
 
-        let expr = SrcAttr::i32("small_value").lt(SrcAttr::i32("large_value"));
-        let is_less = expr.eval(&ctx).unwrap();
-        assert_eq!(is_less, 0.1337 < 18_000.0);
+        let expr = I32Attribute::dst().lt(I32Attribute::src());
+        let is_lower = expr.eval(&ctx).unwrap();
+        assert_eq!(is_lower, 0 < 1500);
 
-        let expr = SrcAttr::i32("zero").eq(SrcAttr::i32("zero"));
+        let expr = I32Attribute::dst().eq(F32Attribute::dst().as_());
         let is_equal = expr.eval(&ctx).unwrap();
-        assert_eq!(is_equal, 0.1337 == 0.1337);
+        assert_eq!(is_equal, true);
     }
 }
-*/
