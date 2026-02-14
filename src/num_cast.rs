@@ -43,7 +43,7 @@ where
     NOut: Num + Copy + Send + Sync + 'static,
     Nd: ExprNode<NIn> + Send + Sync + 'static,
 {
-    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<NOut, ExpressionError> {
+    fn eval(&self, ctx: &dyn EvalContext) -> Result<NOut, ExpressionError> {
         Ok(self.inner.eval_dyn(ctx)?.as_())
     }
 }

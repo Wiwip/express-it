@@ -8,7 +8,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub trait ExprNode<N> {
-    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError>;
+    fn eval(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError>;
 }
 
 #[derive(Default, Debug)]
@@ -43,11 +43,11 @@ where
     }
 
     pub fn eval<Ctx: EvalContext>(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
-        self.inner.eval_node(ctx)
+        self.inner.eval(ctx)
     }
 
     pub fn eval_dyn(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
-        self.inner.eval_node(ctx)
+        self.inner.eval(ctx)
     }
 }
 
@@ -61,6 +61,7 @@ impl<N, Nd: ExprNode<N>> Clone for Expr<N, Nd> {
 pub enum ExpressionError {
     MissingAttribute,
     InvalidTypes,
+    InvalidPath,
     InvalidOperationNeg,
     DivisionByZero,
     DowncastError,
@@ -87,6 +88,9 @@ impl std::fmt::Display for ExpressionError {
             }
             ExpressionError::FailedReflect(msg) => {
                 write!(f, "Failed to reflect expression. Error: {}", msg)
+            }
+            ExpressionError::InvalidPath => {
+                write!(f, "Invalid path, no expression found at destination.")
             }
         }
     }

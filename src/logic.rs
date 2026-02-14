@@ -1,6 +1,29 @@
 use crate::context::EvalContext;
 use crate::expr::{Expr, ExprNode, ExpressionError};
 
+pub trait CompareExpr: Sized {
+    fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr;
+
+    fn gt(self, rhs: impl Into<Self>) -> BoolExpr {
+        self.compare(ComparisonOp::Gt, rhs)
+    }
+    fn ge(self, rhs: impl Into<Self>) -> BoolExpr {
+        self.compare(ComparisonOp::Ge, rhs)
+    }
+    fn lt(self, rhs: impl Into<Self>) -> BoolExpr {
+        self.compare(ComparisonOp::Lt, rhs)
+    }
+    fn le(self, rhs: impl Into<Self>) -> BoolExpr {
+        self.compare(ComparisonOp::Le, rhs)
+    }
+    fn eq(self, rhs: impl Into<Self>) -> BoolExpr {
+        self.compare(ComparisonOp::Eq, rhs)
+    }
+    fn ne(self, rhs: impl Into<Self>) -> BoolExpr {
+        self.compare(ComparisonOp::Ne, rhs)
+    }
+}
+
 pub type BoolExpr = Expr<bool, BoolExprNode>;
 
 pub enum BoolExprNode {
@@ -18,11 +41,10 @@ pub enum BoolExprNode {
 }
 
 impl ExprNode<bool> for BoolExprNode {
-    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
+    fn eval(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
         match self {
             BoolExprNode::Lit(lit) => Ok(lit.clone()),
-            BoolExprNode::Boxed(value) => Ok(value.eval_node(ctx)?),
-            //BoolExprNode::Attribute(attribute) => Ok(ctx.get(attribute)),
+            BoolExprNode::Boxed(value) => Ok(value.eval(ctx)?),
             BoolExprNode::UnaryOp { op, expr } => match op {
                 LogicUnaryOp::Not => Ok(!expr.eval_dyn(ctx)?),
             },
@@ -73,7 +95,7 @@ where
     N: PartialOrd + Copy + Send + Sync + 'static,
     Nd: ExprNode<N> + Send + Sync + 'static,
 {
-    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
+    fn eval(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
         let l = self.lhs.eval_dyn(ctx)?;
         let r = self.rhs.eval_dyn(ctx)?;
         Ok(self.op.compare(&l, &r))
@@ -94,6 +116,7 @@ pub enum LogicBinaryOp {
 
 #[cfg(test)]
 mod tests {
+    use crate::logic::CompareExpr;
     use crate::test_utils::{F32Attribute, I32Attribute, MapContext};
 
     #[test]

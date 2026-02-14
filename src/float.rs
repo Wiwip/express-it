@@ -1,7 +1,7 @@
-use crate::context::{EvalContext, RetrieveAttribute};
+use crate::context::{AttributeKey, EvalContext};
 use crate::expr::{Expr, ExprNode, ExpressionError};
 use crate::impl_float_binary_ops;
-use crate::logic::{BoolExpr, BoolExprNode, Compare, ComparisonOp};
+use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
 use crate::num_cast::CastFrom;
 use num_traits::Float;
 use std::fmt::Debug;
@@ -9,59 +9,14 @@ use std::sync::Arc;
 
 pub type FloatExpr<N> = Expr<N, FloatExprNode<N>>;
 
-impl<N> FloatExpr<N>
+impl<N> CompareExpr for FloatExpr<N>
 where
     N: Float + Send + Sync + 'static,
 {
-    pub fn gt(self, rhs: impl Into<Self>) -> BoolExpr {
+    fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
-            op: ComparisonOp::Gt,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn ge(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Ge,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn lt(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Lt,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn le(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Le,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn eq(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Eq,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn ne(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Ne,
+            op,
             rhs: rhs.into(),
         };
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
@@ -70,33 +25,121 @@ where
 
 pub enum FloatExprNode<N> {
     Lit(N),
-    Attribute(Box<dyn RetrieveAttribute<N> + Send + Sync>),
+    Attribute(AttributeKey),
     Cast(Box<dyn ExprNode<N> + Send + Sync>),
     UnaryOp {
         op: FloatUnaryOp,
         expr: FloatExpr<N>,
     },
     BinaryOp {
-        lhs: FloatExpr<N>,
+        lhs_expr: FloatExpr<N>,
         op: FloatBinaryOp,
-        rhs: FloatExpr<N>,
+        rhs_expr: FloatExpr<N>,
+    },
+    TrinaryOp {
+        value_expr: FloatExpr<N>,
+        op: FloatTrinaryOp,
+        arg1_expr: FloatExpr<N>,
+        arg2_expr: FloatExpr<N>,
     },
 }
 
+macro_rules! float_unary {
+    ($($name:ident => $op:ident),* $(,)?) => {
+        $(
+            pub fn $name(self) -> Self {
+                self.unary_expr(FloatUnaryOp::$op)
+            }
+        )*
+    };
+}
+
+macro_rules! float_binary {
+    ($($name:ident => $op:ident),* $(,)?) => {
+        $(
+            pub fn $name(self, other: Self) -> Self {
+                self.binary_expr(FloatBinaryOp::$op, other)
+            }
+        )*
+    };
+}
+
+impl<N: Float + Send + Sync + 'static> Expr<N, FloatExprNode<N>> {
+    fn unary_expr(self, op: FloatUnaryOp) -> Self {
+        Expr::new(Arc::new(FloatExprNode::UnaryOp { op, expr: self }))
+    }
+
+    fn binary_expr(self, op: FloatBinaryOp, rhs: Self) -> Self {
+        Expr::new(Arc::new(FloatExprNode::BinaryOp {
+            lhs_expr: self,
+            op,
+            rhs_expr: rhs,
+        }))
+    }
+
+    float_unary! {
+        neg => Neg,
+        abs => Abs,
+        acos => Acos,
+        asin => Asin,
+        cos => Cos,
+        sin => Sin,
+        tan => Tan,
+        atan => Atan,
+        floor => Floor,
+        ceil => Ceil,
+        exp => Exp,
+        ln => Ln,
+        log10 => Log10,
+        log2 => Log2,
+        sqrt => Sqrt,
+        cbrt => Cbrt,
+    }
+
+    float_binary!(
+        powf => Pow,
+        min => Min,
+        max => Max,
+    );
+}
+
 impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
-    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
+    fn eval(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
         match self {
             FloatExprNode::Lit(lit) => Ok(lit.clone()),
-            FloatExprNode::Attribute(attribute) => Ok(attribute.retrieve(ctx)?),
-            FloatExprNode::Cast(cast) => Ok(cast.eval_node(ctx)?),
+            FloatExprNode::Attribute(key) => {
+                let value = ctx.get_any(key)?;
+
+                if let Some(val) = value.downcast_ref::<N>() {
+                    Ok(*val)
+                } else {
+                    Err(ExpressionError::InvalidTypes)
+                }
+            }
+            FloatExprNode::Cast(cast) => Ok(cast.eval(ctx)?),
             FloatExprNode::UnaryOp { op, expr } => {
-                let value = expr.inner.eval_node(ctx)?;
+                let value = expr.inner.eval(ctx)?;
                 op.eval(value)
             }
-            FloatExprNode::BinaryOp { lhs, op, rhs } => {
+            FloatExprNode::BinaryOp {
+                lhs_expr: lhs,
+                op,
+                rhs_expr: rhs,
+            } => {
                 let l = lhs.eval_dyn(ctx)?;
                 let r = rhs.eval_dyn(ctx)?;
                 op.eval(l, r)
+            }
+            FloatExprNode::TrinaryOp {
+                value_expr,
+                op,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let value = value_expr.eval_dyn(ctx)?;
+                let arg1 = arg1_expr.eval_dyn(ctx)?;
+                let arg2 = arg2_expr.eval_dyn(ctx)?;
+                op.eval(value, arg1, arg2)
             }
         }
     }
@@ -136,23 +179,52 @@ impl_float_binary_ops!(
 );
 
 #[derive(Debug, Clone, Copy)]
+pub enum FloatConditionOp {
+    IsNan,
+    IsInfinity,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum FloatUnaryOp {
     Neg,
+    Abs,
     Acos,
     Asin,
     Cos,
     Sin,
+    Tan,
+    Atan,
+    Floor,
+    Ceil,
+    Exp,
+    Ln,
+    Log10,
+    Log2,
+    Sqrt,
+    Cbrt,
 }
 
 impl FloatUnaryOp {
     fn eval<N: Float>(&self, value: N) -> Result<N, ExpressionError> {
-        match self {
-            FloatUnaryOp::Sin => Ok(value.sin()),
-            FloatUnaryOp::Asin => Ok(value.asin()),
-            FloatUnaryOp::Cos => Ok(value.cos()),
-            FloatUnaryOp::Acos => Ok(value.acos()),
-            FloatUnaryOp::Neg => Ok(value.neg()),
-        }
+        let result = match self {
+            FloatUnaryOp::Sin => value.sin(),
+            FloatUnaryOp::Asin => value.asin(),
+            FloatUnaryOp::Cos => value.cos(),
+            FloatUnaryOp::Acos => value.acos(),
+            FloatUnaryOp::Neg => value.neg(),
+            FloatUnaryOp::Tan => value.tan(),
+            FloatUnaryOp::Atan => value.atan(),
+            FloatUnaryOp::Abs => value.abs(),
+            FloatUnaryOp::Floor => value.floor(),
+            FloatUnaryOp::Ceil => value.ceil(),
+            FloatUnaryOp::Exp => value.exp(),
+            FloatUnaryOp::Ln => value.ln(),
+            FloatUnaryOp::Log10 => value.log10(),
+            FloatUnaryOp::Log2 => value.log2(),
+            FloatUnaryOp::Sqrt => value.sqrt(),
+            FloatUnaryOp::Cbrt => value.cbrt(),
+        };
+        Ok(result)
     }
 }
 
@@ -164,26 +236,45 @@ pub enum FloatBinaryOp {
     Div,
     Rem,
     Pow,
+    Min,
+    Max,
 }
 
 impl FloatBinaryOp {
     fn eval<N: Float>(&self, l: N, r: N) -> Result<N, ExpressionError> {
-        match self {
-            FloatBinaryOp::Add => Ok(l + r),
-            FloatBinaryOp::Sub => Ok(l - r),
-            FloatBinaryOp::Mul => Ok(l * r),
-            FloatBinaryOp::Div => Ok(l / r),
-            FloatBinaryOp::Rem => Ok(l % r),
-            FloatBinaryOp::Pow => Ok(l.powf(r)),
-        }
+        let result = match self {
+            FloatBinaryOp::Add => l + r,
+            FloatBinaryOp::Sub => l - r,
+            FloatBinaryOp::Mul => l * r,
+            FloatBinaryOp::Div => l / r,
+            FloatBinaryOp::Rem => l % r,
+            FloatBinaryOp::Pow => l.powf(r),
+            FloatBinaryOp::Min => l.min(r),
+            FloatBinaryOp::Max => l.max(r),
+        };
+        Ok(result)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FloatTrinaryOp {
+    Clamp,
+}
+
+impl FloatTrinaryOp {
+    fn eval<N: Float>(&self, val: N, arg1: N, arg2: N) -> Result<N, ExpressionError> {
+        let result = match self {
+            FloatTrinaryOp::Clamp => val.clamp(arg1, arg2),
+        };
+        Ok(result)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::expr::ExpressionError;
-    use crate::test_utils::{I32Attribute, F32Attribute, MapContext};
-    use std::ops::Neg;
+    use crate::test_utils::{F32Attribute, I32Attribute, MapContext};
+    use num_traits::Float;
 
     #[test]
     fn test_unary_ops() {
@@ -220,6 +311,20 @@ mod tests {
         let expr = F32Attribute::dst() / F32Attribute::src();
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 150.0 / 50.0);
+    }
+
+    #[test]
+    fn test_trig_ops() {
+        let mut ctx = MapContext::default();
+        // Destination
+        ctx.insert_dst::<F32Attribute>(150.0);
+
+        // Source
+        ctx.insert_src::<F32Attribute>(50.0);
+
+        let expr = F32Attribute::dst().sin() + F32Attribute::src().cos();
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 150.0.sin() + 50.0.cos());
     }
 
     #[test]

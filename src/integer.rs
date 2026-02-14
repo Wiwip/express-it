@@ -1,66 +1,21 @@
-use crate::context::{EvalContext, RetrieveAttribute};
+use crate::context::{AttributeKey, EvalContext};
 use crate::expr::{Expr, ExprNode, ExpressionError};
 use crate::impl_int_binary_ops;
-use crate::logic::{BoolExpr, BoolExprNode, Compare, ComparisonOp};
+use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
 use crate::num_cast::CastFrom;
 use num_traits::{AsPrimitive, CheckedNeg, PrimInt};
 use std::sync::Arc;
 
 pub type IntExpr<N> = Expr<N, IntExprNode<N>>;
 
-impl<N> IntExpr<N>
+impl<N> CompareExpr for IntExpr<N>
 where
     N: PrimInt + CheckedNeg + Send + Sync + 'static,
 {
-    pub fn gt(self, rhs: impl Into<Self>) -> BoolExpr {
+    fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
             lhs: self,
-            op: ComparisonOp::Gt,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn ge(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Ge,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn lt(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Lt,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn le(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Le,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn eq(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Eq,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-
-    pub fn ne(self, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op: ComparisonOp::Ne,
+            op,
             rhs: rhs.into(),
         };
         BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
@@ -69,16 +24,22 @@ where
 
 pub enum IntExprNode<N> {
     Lit(N),
-    Attribute(Box<dyn RetrieveAttribute<N> + Send + Sync>),
+    Attribute(AttributeKey),
     Cast(Box<dyn ExprNode<N> + Send + Sync>),
     UnaryOp {
         op: IntUnaryOp,
         expr: IntExpr<N>,
     },
     BinaryOp {
-        lhs: IntExpr<N>,
+        lhs_expr: IntExpr<N>,
         op: IntBinaryOp,
-        rhs: IntExpr<N>,
+        rhs_expr: IntExpr<N>,
+    },
+    TrinaryOp {
+        value_expr: IntExpr<N>,
+        op: IntTrinaryOp,
+        arg1_expr: IntExpr<N>,
+        arg2_expr: IntExpr<N>,
     },
 }
 
@@ -86,23 +47,69 @@ impl<N> ExprNode<N> for IntExprNode<N>
 where
     N: PrimInt + CheckedNeg + Send + Sync + 'static,
 {
-    fn eval_node(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
+    fn eval(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
         match self {
             IntExprNode::Lit(lit) => Ok(lit.clone()),
-            IntExprNode::Attribute(attribute) => Ok(attribute.retrieve(ctx)?),
-            IntExprNode::Cast(cast) => Ok(cast.eval_node(ctx)?),
+            IntExprNode::Attribute(key) => {
+                let value = ctx.get_any(key)?;
+
+                if let Some(val) = value.downcast_ref::<N>() {
+                    Ok(*val)
+                } else {
+                    Err(ExpressionError::InvalidTypes)
+                }
+            }
+            IntExprNode::Cast(cast) => Ok(cast.eval(ctx)?),
             IntExprNode::UnaryOp { op, expr } => match op {
                 IntUnaryOp::Neg => expr
                     .eval_dyn(ctx)?
                     .checked_neg()
                     .ok_or(ExpressionError::InvalidOperationNeg),
             },
-            IntExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.eval_dyn(ctx)?;
-                let r = rhs.eval_dyn(ctx)?;
-                op.eval(l, r)
+            IntExprNode::BinaryOp {
+                lhs_expr,
+                op,
+                rhs_expr,
+            } => {
+                let lhs = lhs_expr.eval_dyn(ctx)?;
+                let rhs = rhs_expr.eval_dyn(ctx)?;
+                op.eval(lhs, rhs)
+            }
+            IntExprNode::TrinaryOp {
+                value_expr,
+                op,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let value = value_expr.eval_dyn(ctx)?;
+                let arg1 = arg1_expr.eval_dyn(ctx)?;
+                let arg2 = arg2_expr.eval_dyn(ctx)?;
+                op.eval(value, arg1, arg2)
             }
         }
+    }
+}
+
+impl<N: PrimInt + CheckedNeg + Send + Sync + 'static> Expr<N, IntExprNode<N>> {
+    fn binary_expr(self, op: IntBinaryOp, rhs: Self) -> Self {
+        Expr::new(Arc::new(IntExprNode::BinaryOp {
+            lhs_expr: self,
+            op,
+            rhs_expr: rhs,
+        }))
+    }
+
+    pub fn pow(self, rhs: Self) -> Self {
+        self.binary_expr(IntBinaryOp::Pow, rhs)
+    }
+
+    pub fn clamp(self, min: impl Into<Self>, max: impl Into<Self>) -> Self {
+        Expr::new(Arc::new(IntExprNode::TrinaryOp {
+            value_expr: self,
+            op: IntTrinaryOp::Clamp,
+            arg1_expr: min.into(),
+            arg2_expr: max.into(),
+        }))
     }
 }
 
@@ -156,17 +163,36 @@ pub enum IntBinaryOp {
 
 impl IntBinaryOp {
     fn eval<N: PrimInt + CheckedNeg>(&self, l: N, r: N) -> Result<N, ExpressionError> {
-        match self {
-            IntBinaryOp::Add => Ok(l + r),
-            IntBinaryOp::Sub => Ok(l - r),
-            IntBinaryOp::Mul => Ok(l * r),
-            IntBinaryOp::Div => Ok(l.checked_div(&r).ok_or(ExpressionError::DivisionByZero)?),
-            IntBinaryOp::Rem => Ok(l % r),
-            IntBinaryOp::Pow => Ok(l.pow(r.to_u32().ok_or(ExpressionError::InvalidTypes)?)),
-        }
+        let result = match self {
+            IntBinaryOp::Add => l + r,
+            IntBinaryOp::Sub => l - r,
+            IntBinaryOp::Mul => l * r,
+            IntBinaryOp::Div => l.checked_div(&r).ok_or(ExpressionError::DivisionByZero)?,
+            IntBinaryOp::Rem => l % r,
+            IntBinaryOp::Pow => l.pow(r.to_u32().ok_or(ExpressionError::InvalidTypes)?),
+        };
+        Ok(result)
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum IntTrinaryOp {
+    Clamp,
+}
+
+impl IntTrinaryOp {
+    fn eval<N: PrimInt + CheckedNeg>(
+        &self,
+        val: N,
+        arg1: N,
+        arg2: N,
+    ) -> Result<N, ExpressionError> {
+        let result = match self {
+            IntTrinaryOp::Clamp => val.clamp(arg1, arg2),
+        };
+        Ok(result)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -208,6 +234,23 @@ mod tests {
         let expr = I32Attribute::dst() / I32Attribute::src();
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 150 / 50);
+    }
+
+    #[test]
+    fn test_trinary_ops() {
+        let mut ctx = MapContext::default();
+        // Destination
+        ctx.insert_dst::<I32Attribute>(150);
+        // Source
+        ctx.insert_src::<I32Attribute>(50);
+
+        let expr = I32Attribute::dst().clamp(0, 100);
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 100);
+
+        let expr = I32Attribute::src().clamp(0, 100);
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 50);
     }
 
     #[test]

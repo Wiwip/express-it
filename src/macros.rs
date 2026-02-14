@@ -14,11 +14,11 @@ macro_rules! impl_float_binary_ops {
             {
                 type Output = Self;
 
-                fn $method(self, rhs: Self) -> Self::Output {
+                fn $method(self, rhs_expr: Self) -> Self::Output {
                     Expr::new(std::sync::Arc::new($target::$node_variant {
-                        lhs: self,
+                        lhs_expr: self,
                         op: $op_enum::$variant,
-                        rhs,
+                        rhs_expr,
                     }))
                 }
             }
@@ -42,11 +42,11 @@ macro_rules! impl_int_binary_ops {
             {
                 type Output = Self;
 
-                fn $method(self, rhs: Self) -> Self::Output {
+                fn $method(self, rhs_expr: Self) -> Self::Output {
                     Expr::new(std::sync::Arc::new($target::$node_variant {
-                        lhs: self,
+                        lhs_expr: self,
                         op: $op_enum::$variant,
-                        rhs,
+                        rhs_expr,
                     }))
                 }
             }
