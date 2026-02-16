@@ -159,6 +159,8 @@ pub enum IntBinaryOp {
     Div,
     Rem,
     Pow,
+    Min,
+    Max,
 }
 
 impl IntBinaryOp {
@@ -170,6 +172,8 @@ impl IntBinaryOp {
             IntBinaryOp::Div => l.checked_div(&r).ok_or(ExpressionError::DivisionByZero)?,
             IntBinaryOp::Rem => l % r,
             IntBinaryOp::Pow => l.pow(r.to_u32().ok_or(ExpressionError::InvalidTypes)?),
+            IntBinaryOp::Min => l.min(r),
+            IntBinaryOp::Max => l.max(r),
         };
         Ok(result)
     }

@@ -54,27 +54,9 @@ macro_rules! float_unary {
     };
 }
 
-macro_rules! float_binary {
-    ($($name:ident => $op:ident),* $(,)?) => {
-        $(
-            pub fn $name(self, other: Self) -> Self {
-                self.binary_expr(FloatBinaryOp::$op, other)
-            }
-        )*
-    };
-}
-
 impl<N: Float + 'static> Expr<N, FloatExprNode<N>> {
     fn unary_expr(self, op: FloatUnaryOp) -> Self {
         Expr::new(Arc::new(FloatExprNode::UnaryOp { op, expr: self }))
-    }
-
-    fn binary_expr(self, op: FloatBinaryOp, rhs: Self) -> Self {
-        Expr::new(Arc::new(FloatExprNode::BinaryOp {
-            lhs_expr: self,
-            op,
-            rhs_expr: rhs,
-        }))
     }
 
     float_unary! {
@@ -95,12 +77,12 @@ impl<N: Float + 'static> Expr<N, FloatExprNode<N>> {
         sqrt => Sqrt,
         cbrt => Cbrt,
     }
+}
 
-    float_binary!(
-        powf => Pow,
-        min => Min,
-        max => Max,
-    );
+impl<N: Float + 'static> Into<Expr<N, FloatExprNode<N>>> for FloatExprNode<N> {
+    fn into(self) -> Expr<N, FloatExprNode<N>> {
+        Expr::new(Arc::new(self))
+    }
 }
 
 impl<N: Float + 'static> ExprNode<N> for FloatExprNode<N> {
@@ -273,9 +255,9 @@ impl FloatTrinaryOp {
 #[cfg(test)]
 mod tests {
     use crate::expr::ExpressionError;
+    use crate::test_utils::scopes::{DST, SRC};
     use crate::test_utils::{F32Attribute, I32Attribute, MapContext};
     use num_traits::Float;
-    use crate::test_utils::scopes::{DST, SRC};
 
     #[test]
     fn test_unary_ops() {

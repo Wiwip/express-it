@@ -1,9 +1,9 @@
 use crate::context::{Path, ReadContext, ScopeId};
-use crate::float::FloatExprNode;
+use crate::float::{FloatBinaryOp, FloatExprNode};
 use crate::frame::Assignment;
-use crate::integer::IntExprNode;
+use crate::integer::{IntBinaryOp, IntExprNode};
 use crate::num_cast::{CastFrom, CastNumPrimitive};
-use num_traits::{AsPrimitive, Num};
+use num_traits::{AsPrimitive, CheckedNeg, Float, Num, PrimInt};
 use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -57,6 +57,59 @@ where
             path: Path::from_name(scope, name),
             expr: Expr::new(self.inner.clone()),
         }
+    }
+}
+
+
+impl<N> Expr<N, FloatExprNode<N>>
+where
+    N: Float + 'static,
+    Self: From<N>,
+{
+    pub fn min(self, rhs: N) -> Self {
+        Expr::new(Arc::new(FloatExprNode::BinaryOp {
+            lhs_expr: self,
+            op: FloatBinaryOp::Min,
+            rhs_expr: rhs.into(),
+        }))
+    }
+
+    pub fn max(self, rhs: N) -> Self {
+        Expr::new(Arc::new(FloatExprNode::BinaryOp {
+            lhs_expr: self,
+            op: FloatBinaryOp::Max,
+            rhs_expr: rhs.into(),
+        }))
+    }
+
+    pub fn powf(self, rhs: N) -> Self {
+        Expr::new(Arc::new(FloatExprNode::BinaryOp {
+            lhs_expr: self,
+            op: FloatBinaryOp::Pow,
+            rhs_expr: rhs.into(),
+        }))
+    }
+}
+
+impl<N> Expr<N, IntExprNode<N>>
+where
+    N: PrimInt + CheckedNeg + 'static,
+    Self: From<N>,
+{
+    pub fn min(self, rhs: N) -> Self {
+        Expr::new(Arc::new(IntExprNode::BinaryOp {
+            lhs_expr: self,
+            op: IntBinaryOp::Min,
+            rhs_expr: rhs.into(),
+        }))
+    }
+
+    pub fn max(self, rhs: N) -> Self {
+        Expr::new(Arc::new(IntExprNode::BinaryOp {
+            lhs_expr: self,
+            op: IntBinaryOp::Max,
+            rhs_expr: rhs.into(),
+        }))
     }
 }
 

@@ -233,11 +233,37 @@ mod tests {
         ctx.insert::<Def>(DST, 2.0);
 
         let dmg_taken_expr = Atk::get(SRC) - Def::get(DST);
-        let new_hp_expr = Hp::get(DST) - dmg_taken_expr.clone().max(0.0.into());
+        let new_hp_expr = Hp::get(DST) - dmg_taken_expr.clone().max(0.0);
 
         let lp = LazyPlan::new().step(Hp::set(DST, new_hp_expr));
 
         lp.commit(&mut ctx);
+
+        let expr = FloatExprNode::Attribute(Path::from_type::<Hp>(DST));
+        let expr_result: f32 = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 12.0);
+    }
+
+    #[test]
+    fn test_interim_ops() {
+        let mut ctx = MapContext::default();
+        ctx.insert::<Atk>(SRC, 10.0);
+
+        ctx.insert::<Hp>(DST, 20.0);
+        ctx.insert::<Def>(DST, 2.0);
+
+        let dmg_taken_expr = Atk::get(SRC) - Def::get(DST);
+        let get_dmg_taken: FloatExpr<f32> = FloatExprNode::Attribute(Path::from_name(DST, "dmg_taken")).into();
+
+        let lp = LazyPlan::new()
+            .step(dmg_taken_expr.max(0.0).alias(DST, "dmg_taken"))
+            .step(Hp::set(DST, Hp::get(DST) - get_dmg_taken));
+
+        lp.commit(&mut ctx);
+
+        let expr = FloatExprNode::<f32>::Attribute(Path::from_name(DST, "dmg_taken"));
+        let expr_result: f32 = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 12.0);
 
         let expr = FloatExprNode::Attribute(Path::from_type::<Hp>(DST));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
