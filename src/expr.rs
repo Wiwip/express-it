@@ -1,4 +1,4 @@
-use crate::context::{AttributeKey, ReadContext};
+use crate::context::{Path, ReadContext, ScopeId};
 use crate::float::FloatExprNode;
 use crate::frame::Assignment;
 use crate::integer::IntExprNode;
@@ -51,10 +51,10 @@ where
         self.inner.eval(ctx)
     }
 
-    pub fn alias<T: 'static>(&self, name: &str) -> Assignment<N, Nd>
+    pub fn alias(&self, scope: impl Into<ScopeId>, name: &str) -> Assignment<N, Nd>
     {
         Assignment {
-            key: AttributeKey::new::<T>(name),
+            path: Path::from_name(scope, name),
             expr: Expr::new(self.inner.clone()),
         }
     }

@@ -1,44 +1,43 @@
-use crate::context::{AttributeKey, ReadContext, WriteContext};
+use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
 use crate::expr::{Expr, ExpressionError};
 use crate::float::{FloatExpr, FloatExprNode};
 use crate::frame::ExprAttribute;
 use crate::integer::{IntExpr, IntExprNode};
-use smol_str::ToSmolStr;
+use crate::test_utils::scopes::{DST, SRC};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub mod scopes {
+    use super::ScopeId;
+    pub const SRC: ScopeId = ScopeId(0);
+    pub const DST: ScopeId = ScopeId(1);
+}
+
 #[derive(Default, Debug)]
-pub struct MapContext(pub HashMap<smol_str::SmolStr, HashMap<TypeId, Box<dyn Any>>>);
+pub struct MapContext(pub HashMap<(ScopeId, u64), Box<dyn Any>>);
 
 impl MapContext {
-    pub fn insert_src<T: ExprAttribute + 'static>(&mut self, value: T::Property)
-    where
+    pub fn insert<T: ExprAttribute + 'static>(
+        &mut self,
+        scope: impl Into<ScopeId>,
+        value: T::Property,
+    ) where
         T::Property: Send + Sync,
     {
-        self.0
-            .entry("src".into())
-            .or_insert(HashMap::new())
-            .insert(TypeId::of::<T>(), Box::new(value));
-    }
+        let path = Path::from_type::<T>(scope);
 
-    pub fn insert_dst<T: ExprAttribute + 'static>(&mut self, value: T::Property)
-    where
-        T::Property: Send + Sync,
-    {
         self.0
-            .entry("dst".into())
-            .or_insert(HashMap::new())
-            .insert(TypeId::of::<T>(), Box::new(value));
+            .entry((path.scope(), path.path()))
+            .or_insert(Box::new(value));
     }
 }
 
 impl ReadContext for MapContext {
-    fn get_any(&self, path: &AttributeKey) -> Result<&dyn Any, ExpressionError> {
+    fn get_any(&self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError> {
         let val = self
             .0
-            .get(path.path.as_str())
-            .and_then(|m| m.get(&path.type_id))
+            .get(&(access.scope(), access.path()))
             .ok_or(ExpressionError::MissingAttribute)?;
         Ok(val.as_ref())
     }
@@ -48,16 +47,13 @@ impl ReadContext for MapContext {
         _path: &str,
         _type_id: TypeId,
     ) -> Result<&dyn Any, ExpressionError> {
-        todo!()
+        unreachable!()
     }
 }
 
 impl WriteContext for MapContext {
-    fn write(&mut self, path: &AttributeKey, value: Box<dyn Any>) {
-        self.0
-            .entry(path.path.to_smolstr())
-            .or_insert(HashMap::new())
-            .insert(path.type_id, value);
+    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any>) {
+        self.0.insert(access.key(), value);
     }
 }
 
@@ -66,12 +62,12 @@ pub struct F32Attribute;
 
 impl F32Attribute {
     pub fn src() -> FloatExpr<f32> {
-        let expr = FloatExprNode::Attribute(AttributeKey::new::<Self>("src"));
+        let expr = FloatExprNode::Attribute(Path::from_type::<Self>(SRC));
         Expr::new(Arc::new(expr))
     }
 
     pub fn dst() -> FloatExpr<f32> {
-        let expr = FloatExprNode::Attribute(AttributeKey::new::<Self>("dst"));
+        let expr = FloatExprNode::Attribute(Path::from_type::<Self>(DST));
         Expr::new(Arc::new(expr))
     }
 }
@@ -86,13 +82,13 @@ pub struct I32Attribute;
 impl I32Attribute {
     #[allow(unused)]
     pub fn src() -> IntExpr<i32> {
-        let expr = IntExprNode::Attribute(AttributeKey::new::<Self>("src"));
+        let expr = IntExprNode::Attribute(Path::from_type::<Self>(SRC));
         Expr::new(Arc::new(expr))
     }
 
     #[allow(unused)]
     pub fn dst() -> IntExpr<i32> {
-        let expr = IntExprNode::Attribute(AttributeKey::new::<Self>("dst"));
+        let expr = IntExprNode::Attribute(Path::from_type::<Self>(DST));
         Expr::new(Arc::new(expr))
     }
 }
@@ -107,13 +103,13 @@ pub struct U32Attribute;
 impl U32Attribute {
     #[allow(unused)]
     pub fn src() -> IntExpr<u32> {
-        let expr = IntExprNode::Attribute(AttributeKey::new::<Self>("src"));
+        let expr = IntExprNode::Attribute(Path::from_type::<Self>(SRC));
         Expr::new(Arc::new(expr))
     }
 
     #[allow(unused)]
     pub fn dst() -> IntExpr<u32> {
-        let expr = IntExprNode::Attribute(AttributeKey::new::<Self>("dst"));
+        let expr = IntExprNode::Attribute(Path::from_type::<Self>(DST));
         Expr::new(Arc::new(expr))
     }
 }

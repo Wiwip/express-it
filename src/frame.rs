@@ -1,18 +1,19 @@
-use crate::context::{AttributeKey, ReadContext, WriteContext};
+use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
 use crate::expr::{Expr, ExprNode, ExpressionError};
 use std::any::Any;
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 trait Context: ReadContext + WriteContext {
     fn commit(&mut self);
 }
 
 pub trait ExprAttribute {
-    type Property;
+    type Property: Debug;
 }
 
 pub struct Assignment<N, Nd: ExprNode<N>> {
-    pub key: AttributeKey,
+    pub path: Path,
     pub expr: Expr<N, Nd>,
 }
 
@@ -20,10 +21,15 @@ trait Executor {
     fn run(&mut self, ctx: &mut dyn Context);
 }
 
-impl<N: 'static, Nd: ExprNode<N>> Executor for Assignment<N, Nd> {
+impl<N: 'static + Debug, Nd: ExprNode<N>> Executor for Assignment<N, Nd> {
     fn run(&mut self, ctx: &mut dyn Context) {
-        let result = self.expr.inner.eval(ctx).unwrap();
-        ctx.write(&self.key, Box::new(result));
+        let result = self.expr.inner.eval(ctx).unwrap_or_else(|_| {
+            panic!(
+                "Executor failed. {} value could not be found in context.",
+                self.path
+            )
+        });
+        ctx.write(&self.path, Box::new(result));
     }
 }
 
@@ -32,23 +38,27 @@ impl<N: 'static, Nd: ExprNode<N>> Executor for Assignment<N, Nd> {
 /// Writes-back to the world only when commit is called.
 pub struct ShadowContext<'a, Ctx> {
     ctx: &'a mut Ctx,
-    shadow: &'a mut HashMap<AttributeKey, Box<dyn Any>>,
+    shadow: &'a mut HashMap<(ScopeId, u64), Box<dyn Any>>,
 }
 
 impl<Ctx: ReadContext + WriteContext> Context for ShadowContext<'_, Ctx> {
     fn commit(&mut self) {
         for (key, value) in self.shadow.drain() {
-            self.ctx.write(&key, value);
+            let path = Path {
+                scope: key.0,
+                path: key.1,
+            };
+            self.ctx.write(&path, value);
         }
     }
 }
 
 impl<Ctx: ReadContext> ReadContext for ShadowContext<'_, Ctx> {
-    fn get_any(&self, path: &AttributeKey) -> Result<&dyn Any, ExpressionError> {
-        if let Some(value) = self.shadow.get(path) {
+    fn get_any(&self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError> {
+        if let Some(value) = self.shadow.get(&access.key()) {
             Ok(value.as_ref())
         } else {
-            self.ctx.get_any(path)
+            self.ctx.get_any(access)
         }
     }
 
@@ -62,8 +72,8 @@ impl<Ctx: ReadContext> ReadContext for ShadowContext<'_, Ctx> {
 }
 
 impl<Ctx: WriteContext> WriteContext for ShadowContext<'_, Ctx> {
-    fn write(&mut self, path: &AttributeKey, value: Box<dyn Any>) {
-        self.shadow.insert(path.clone(), value);
+    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any>) {
+        self.shadow.insert(access.key(), value);
     }
 }
 
@@ -73,7 +83,7 @@ pub struct Step {
 
 impl<N, Nd> From<Assignment<N, Nd>> for Step
 where
-    N: 'static,
+    N: 'static + Debug,
     Nd: ExprNode<N> + 'static,
 {
     fn from(value: Assignment<N, Nd>) -> Self {
@@ -117,7 +127,7 @@ impl_step_from_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_step_from_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
 
 pub struct LazyPlan {
-    shadow_buffer: HashMap<AttributeKey, Box<dyn Any>>,
+    shadow_buffer: HashMap<(ScopeId, u64), Box<dyn Any>>,
     plan: Vec<Step>,
 }
 
@@ -140,107 +150,97 @@ impl LazyPlan {
             shadow: &mut self.shadow_buffer,
             ctx,
         };
-
         // Execute plan
         for step in &mut self.plan {
             step.run(&mut shadow_view);
         }
-
         // Commit key/values from temp buffer to destination
-        shadow_view.commit()
+        shadow_view.commit();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::context::AttributeKey;
+    use crate::context::{Path, ScopeId};
     use crate::expr::{Expr, ExprNode};
     use crate::float::{FloatExpr, FloatExprNode};
-    use crate::frame::{Assignment, LazyPlan};
-    use crate::integer::IntExprNode;
-    use crate::test_utils::{I32Attribute, MapContext};
-    use std::ops::Neg;
+    use crate::frame::{Assignment, ExprAttribute, LazyPlan};
+    use crate::test_utils::MapContext;
+    use crate::test_utils::scopes::{DST, SRC};
     use std::sync::Arc;
 
     struct Atk;
     impl Atk {
-        pub fn set(expr: FloatExpr<f32>) -> Assignment<f32, FloatExprNode<f32>> {
-            Assignment {
-                key: Self::key(),
-                expr,
-            }
+        #[allow(dead_code)]
+        pub fn set(
+            key: impl Into<ScopeId>,
+            expr: FloatExpr<f32>,
+        ) -> Assignment<f32, FloatExprNode<f32>> {
+            let path = Path::from_type::<Self>(key.into());
+            Assignment { path, expr }
         }
-        pub fn key() -> AttributeKey {
-            AttributeKey::new::<Self>("src.atk")
+        pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
+            let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
+            Expr::new(Arc::new(expr))
         }
+    }
+    impl ExprAttribute for Atk {
+        type Property = f32;
     }
 
     struct Def;
     impl Def {
-        pub fn set(expr: FloatExpr<f32>) -> Assignment<f32, FloatExprNode<f32>> {
-            Assignment {
-                key: Self::key(),
-                expr,
-            }
+        #[allow(dead_code)]
+        pub fn set(
+            key: impl Into<ScopeId>,
+            expr: FloatExpr<f32>,
+        ) -> Assignment<f32, FloatExprNode<f32>> {
+            let path = Path::from_type::<Self>(key.into());
+            Assignment { path, expr }
         }
-        pub fn key() -> AttributeKey {
-            AttributeKey::new::<Self>("src.atk")
+        pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
+            let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
+            Expr::new(Arc::new(expr))
         }
     }
-
-    struct Source;
+    impl ExprAttribute for Def {
+        type Property = f32;
+    }
+    struct Hp;
+    impl Hp {
+        pub fn set(
+            key: impl Into<ScopeId>,
+            expr: FloatExpr<f32>,
+        ) -> Assignment<f32, FloatExprNode<f32>> {
+            let path = Path::from_type::<Self>(key.into());
+            Assignment { path, expr }
+        }
+        pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
+            let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
+            Expr::new(Arc::new(expr))
+        }
+    }
+    impl ExprAttribute for Hp {
+        type Property = f32;
+    }
 
     #[test]
     fn test_sequential_ops() {
         let mut ctx = MapContext::default();
-        ctx.insert_dst::<I32Attribute>(150);
+        ctx.insert::<Atk>(SRC, 10.0);
 
-        let atk_expr = I32Attribute::dst().neg();
-        let double_atk_expr = I32Attribute::dst() * 2;
-        let def_expr = I32Attribute::dst() + 100;
+        ctx.insert::<Hp>(DST, 20.0);
+        ctx.insert::<Def>(DST, 2.0);
 
-        let use_double_atk_expr = Expr::new(Arc::new(IntExprNode::<i32>::Attribute(
-            AttributeKey::new::<Source>("double_attack"),
-        )));
+        let dmg_taken_expr = Atk::get(SRC) - Def::get(DST);
+        let new_hp_expr = Hp::get(DST) - dmg_taken_expr.clone().max(0.0.into());
 
-        let lp = LazyPlan::new()
-            .step((
-                Atk::set(atk_expr.as_()),
-                double_atk_expr.alias::<Source>("double_attack"),
-                Def::set(def_expr.as_()),
-            ))
-            .step(Atk::set(use_double_atk_expr.as_()));
+        let lp = LazyPlan::new().step(Hp::set(DST, new_hp_expr));
 
         lp.commit(&mut ctx);
 
-        println!("{:?}", ctx);
-        println!("{:?}", Atk::key());
-
-        let expr = FloatExprNode::Attribute(Atk::key());
+        let expr = FloatExprNode::Attribute(Path::from_type::<Hp>(DST));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 300.0);
+        assert_eq!(expr_result, 12.0);
     }
-
-    /*#[test]
-    fn test_many_sequential_ops() {
-        let mut ctx = MapContext::default();
-        ctx.insert_dst::<I32Attribute>(150);
-
-        let atk_expr = I32Attribute::dst().neg();
-        let def_expr = I32Attribute::dst() + 100;
-
-        let _lf = LazyExecutor::new(&mut ctx)
-            //.step()
-            .step((Atk::set(atk_expr.as_()), Def::set(def_expr.as_())))
-            .step(Atk::set(atk_expr.as_()))
-            .commit();
-
-        let expr = FloatExprNode::Attribute(Atk::key());
-        let expr_result: f32 = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, -150.0);
-
-        let expr = FloatExprNode::Attribute(Def::key());
-        let expr_result: f32 = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 250.0);
-    }*/
 }

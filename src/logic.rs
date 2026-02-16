@@ -118,13 +118,14 @@ pub enum LogicBinaryOp {
 mod tests {
     use crate::logic::CompareExpr;
     use crate::test_utils::{F32Attribute, I32Attribute, MapContext};
+    use crate::test_utils::scopes::{DST, SRC};
 
     #[test]
     fn test_float_logic() {
         let mut ctx = MapContext::default();
-        ctx.insert_src::<F32Attribute>(1500.0);
-        ctx.insert_dst::<F32Attribute>(0.0);
-        ctx.insert_dst::<I32Attribute>(0);
+        ctx.insert::<F32Attribute>(SRC, 1500.0);
+        ctx.insert::<F32Attribute>(DST,0.0);
+        ctx.insert::<I32Attribute>(DST, 0);
 
         let expr = F32Attribute::src().gt(F32Attribute::dst());
         let is_greater = expr.eval(&ctx).unwrap();
@@ -142,9 +143,9 @@ mod tests {
     #[test]
     fn test_int_logic() {
         let mut ctx = MapContext::default();
-        ctx.insert_src::<I32Attribute>(1500);
-        ctx.insert_dst::<I32Attribute>(0);
-        ctx.insert_dst::<F32Attribute>(0.0);
+        ctx.insert::<I32Attribute>(SRC, 1500);
+        ctx.insert::<I32Attribute>(DST, 0);
+        ctx.insert::<F32Attribute>(DST, 0.0);
 
         let expr = I32Attribute::src().gt(I32Attribute::dst());
         let is_greater = expr.eval(&ctx).unwrap();

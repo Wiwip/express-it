@@ -1,4 +1,4 @@
-use crate::context::{AttributeKey, ReadContext};
+use crate::context::{Path, ReadContext};
 use crate::expr::{Expr, ExprNode, ExpressionError};
 use crate::impl_float_binary_ops;
 use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
@@ -25,7 +25,7 @@ where
 
 pub enum FloatExprNode<N> {
     Lit(N),
-    Attribute(AttributeKey),
+    Attribute(Path),
     Cast(Box<dyn ExprNode<N>>),
     UnaryOp {
         op: FloatUnaryOp,
@@ -275,12 +275,13 @@ mod tests {
     use crate::expr::ExpressionError;
     use crate::test_utils::{F32Attribute, I32Attribute, MapContext};
     use num_traits::Float;
+    use crate::test_utils::scopes::{DST, SRC};
 
     #[test]
     fn test_unary_ops() {
         let mut ctx = MapContext::default();
         // Destination
-        ctx.insert_dst::<F32Attribute>(150.0);
+        ctx.insert::<F32Attribute>(DST, 150.0);
 
         let expr = F32Attribute::dst().neg();
         let expr_result = expr.eval(&ctx).unwrap();
@@ -291,10 +292,10 @@ mod tests {
     fn test_binary_ops() {
         let mut ctx = MapContext::default();
         // Destination
-        ctx.insert_dst::<F32Attribute>(150.0);
+        ctx.insert::<F32Attribute>(DST, 150.0);
 
         // Source
-        ctx.insert_src::<F32Attribute>(50.0);
+        ctx.insert::<F32Attribute>(SRC, 50.0);
 
         let expr = F32Attribute::dst() - F32Attribute::src();
         let expr_result = expr.eval(&ctx).unwrap();
@@ -317,10 +318,10 @@ mod tests {
     fn test_trig_ops() {
         let mut ctx = MapContext::default();
         // Destination
-        ctx.insert_dst::<F32Attribute>(150.0);
+        ctx.insert::<F32Attribute>(DST, 150.0);
 
         // Source
-        ctx.insert_src::<F32Attribute>(50.0);
+        ctx.insert::<F32Attribute>(SRC, 50.0);
 
         let expr = F32Attribute::dst().sin() + F32Attribute::src().cos();
         let expr_result = expr.eval(&ctx).unwrap();
@@ -331,8 +332,8 @@ mod tests {
     fn test_cast_op() {
         let mut ctx = MapContext::default();
         // Source
-        ctx.insert_src::<I32Attribute>(49);
-        ctx.insert_src::<F32Attribute>(1500.0);
+        ctx.insert::<I32Attribute>(SRC, 49);
+        ctx.insert::<F32Attribute>(SRC, 1500.0);
 
         let expr = F32Attribute::src() + I32Attribute::src().as_();
         let expr_result = expr.eval(&ctx).unwrap();
@@ -347,8 +348,8 @@ mod tests {
     fn test_error_ops() {
         let mut ctx = MapContext::default();
         // Source
-        ctx.insert_src::<I32Attribute>(0);
-        ctx.insert_src::<F32Attribute>(1500.0);
+        ctx.insert::<I32Attribute>(SRC, 0);
+        ctx.insert::<F32Attribute>(SRC, 1500.0);
 
         let expr = F32Attribute::src() / I32Attribute::src().as_();
         let expr_result = expr.eval(&ctx);
