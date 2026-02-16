@@ -1,5 +1,6 @@
-use crate::context::EvalContext;
+use crate::context::{AttributeKey, ReadContext};
 use crate::float::FloatExprNode;
+use crate::frame::Assignment;
 use crate::integer::IntExprNode;
 use crate::num_cast::{CastFrom, CastNumPrimitive};
 use num_traits::{AsPrimitive, Num};
@@ -8,7 +9,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 pub trait ExprNode<N> {
-    fn eval(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError>;
+    fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError>;
 }
 
 #[derive(Default, Debug)]
@@ -28,12 +29,12 @@ impl<N, Nd: ExprNode<N>> Expr<N, Nd> {
 
 impl<N, Nd> Expr<N, Nd>
 where
-    N: Copy + Send + Sync + 'static,
-    Nd: ExprNode<N> + Send + Sync + 'static,
+    N: Copy,
+    Nd: ExprNode<N> + 'static,
 {
     pub fn as_<NOut, NdOut: ExprNode<NOut>>(&self) -> Expr<NOut, NdOut>
     where
-        NOut: Num + Copy + Send + Sync + 'static,
+        NOut: Num + Copy + 'static,
         N: AsPrimitive<NOut>,
         NdOut: ExprNode<NOut> + CastFrom<NOut>,
     {
@@ -42,12 +43,20 @@ where
         Expr::new(Arc::new(expr_node))
     }
 
-    pub fn eval<Ctx: EvalContext>(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
+    pub fn eval<Ctx: ReadContext>(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
         self.inner.eval(ctx)
     }
 
-    pub fn eval_dyn(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
+    pub fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
         self.inner.eval(ctx)
+    }
+
+    pub fn alias<T: 'static>(&self, name: &str) -> Assignment<N, Nd>
+    {
+        Assignment {
+            key: AttributeKey::new::<T>(name),
+            expr: Expr::new(self.inner.clone()),
+        }
     }
 }
 

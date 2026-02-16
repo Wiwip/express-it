@@ -1,4 +1,4 @@
-use crate::context::EvalContext;
+use crate::context::ReadContext;
 use crate::expr::{Expr, ExprNode, ExpressionError};
 use num_traits::{AsPrimitive, Num};
 use std::any::type_name;
@@ -6,7 +6,7 @@ use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
 pub trait CastFrom<N>: Sized {
-    fn cast_from(node: Box<dyn ExprNode<N> + Send + Sync>) -> Self;
+    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self;
 }
 
 pub struct CastNumPrimitive<NOut, NIn, Nd: ExprNode<NIn>> {
@@ -16,8 +16,8 @@ pub struct CastNumPrimitive<NOut, NIn, Nd: ExprNode<NIn>> {
 
 impl<NOut, NIn, Nd> CastNumPrimitive<NOut, NIn, Nd>
 where
-    NOut: Copy + Send + Sync + 'static,
-    NIn: AsPrimitive<NOut> + Copy + Send + Sync,
+    NOut: Copy + 'static,
+    NIn: AsPrimitive<NOut> + Copy,
     Nd: ExprNode<NIn>,
 {
     pub fn new(inner: Expr<NIn, Nd>) -> Self {
@@ -39,11 +39,11 @@ where
 
 impl<NIn, NOut, Nd> ExprNode<NOut> for CastNumPrimitive<NOut, NIn, Nd>
 where
-    NIn: AsPrimitive<NOut> + Copy + Send + Sync + 'static,
-    NOut: Num + Copy + Send + Sync + 'static,
-    Nd: ExprNode<NIn> + Send + Sync + 'static,
+    NIn: AsPrimitive<NOut> + Copy,
+    NOut: Num + Copy + 'static,
+    Nd: ExprNode<NIn> + 'static,
 {
-    fn eval(&self, ctx: &dyn EvalContext) -> Result<NOut, ExpressionError> {
+    fn eval(&self, ctx: &dyn ReadContext) -> Result<NOut, ExpressionError> {
         Ok(self.inner.eval_dyn(ctx)?.as_())
     }
 }

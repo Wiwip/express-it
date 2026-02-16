@@ -1,4 +1,4 @@
-use crate::context::{AttributeKey, EvalContext};
+use crate::context::{AttributeKey, ReadContext};
 use crate::expr::{Expr, ExprNode, ExpressionError};
 use crate::impl_float_binary_ops;
 use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
@@ -11,7 +11,7 @@ pub type FloatExpr<N> = Expr<N, FloatExprNode<N>>;
 
 impl<N> CompareExpr for FloatExpr<N>
 where
-    N: Float + Send + Sync + 'static,
+    N: Float + 'static,
 {
     fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
@@ -26,7 +26,7 @@ where
 pub enum FloatExprNode<N> {
     Lit(N),
     Attribute(AttributeKey),
-    Cast(Box<dyn ExprNode<N> + Send + Sync>),
+    Cast(Box<dyn ExprNode<N>>),
     UnaryOp {
         op: FloatUnaryOp,
         expr: FloatExpr<N>,
@@ -64,7 +64,7 @@ macro_rules! float_binary {
     };
 }
 
-impl<N: Float + Send + Sync + 'static> Expr<N, FloatExprNode<N>> {
+impl<N: Float + 'static> Expr<N, FloatExprNode<N>> {
     fn unary_expr(self, op: FloatUnaryOp) -> Self {
         Expr::new(Arc::new(FloatExprNode::UnaryOp { op, expr: self }))
     }
@@ -103,8 +103,8 @@ impl<N: Float + Send + Sync + 'static> Expr<N, FloatExprNode<N>> {
     );
 }
 
-impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
-    fn eval(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
+impl<N: Float + 'static> ExprNode<N> for FloatExprNode<N> {
+    fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
         match self {
             FloatExprNode::Lit(lit) => Ok(lit.clone()),
             FloatExprNode::Attribute(key) => {
@@ -145,8 +145,8 @@ impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
     }
 }
 
-impl<N: Send + Sync> CastFrom<N> for FloatExprNode<N> {
-    fn cast_from(node: Box<dyn ExprNode<N> + Send + Sync>) -> Self {
+impl<N> CastFrom<N> for FloatExprNode<N> {
+    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self {
         FloatExprNode::Cast(node)
     }
 }

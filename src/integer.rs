@@ -1,4 +1,4 @@
-use crate::context::{AttributeKey, EvalContext};
+use crate::context::{AttributeKey, ReadContext};
 use crate::expr::{Expr, ExprNode, ExpressionError};
 use crate::impl_int_binary_ops;
 use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
@@ -10,7 +10,7 @@ pub type IntExpr<N> = Expr<N, IntExprNode<N>>;
 
 impl<N> CompareExpr for IntExpr<N>
 where
-    N: PrimInt + CheckedNeg + Send + Sync + 'static,
+    N: PrimInt + CheckedNeg + 'static,
 {
     fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
@@ -25,7 +25,7 @@ where
 pub enum IntExprNode<N> {
     Lit(N),
     Attribute(AttributeKey),
-    Cast(Box<dyn ExprNode<N> + Send + Sync>),
+    Cast(Box<dyn ExprNode<N>>),
     UnaryOp {
         op: IntUnaryOp,
         expr: IntExpr<N>,
@@ -45,9 +45,9 @@ pub enum IntExprNode<N> {
 
 impl<N> ExprNode<N> for IntExprNode<N>
 where
-    N: PrimInt + CheckedNeg + Send + Sync + 'static,
+    N: PrimInt + CheckedNeg + 'static,
 {
-    fn eval(&self, ctx: &dyn EvalContext) -> Result<N, ExpressionError> {
+    fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
         match self {
             IntExprNode::Lit(lit) => Ok(lit.clone()),
             IntExprNode::Attribute(key) => {
@@ -114,7 +114,7 @@ impl<N: PrimInt + CheckedNeg + Send + Sync + 'static> Expr<N, IntExprNode<N>> {
 }
 
 impl<N> CastFrom<N> for IntExprNode<N> {
-    fn cast_from(node: Box<dyn ExprNode<N> + Send + Sync>) -> Self {
+    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self {
         IntExprNode::Cast(node)
     }
 }

@@ -1,4 +1,4 @@
-use crate::context::EvalContext;
+use crate::context::ReadContext;
 use crate::expr::{Expr, ExprNode, ExpressionError};
 
 pub trait CompareExpr: Sized {
@@ -28,7 +28,7 @@ pub type BoolExpr = Expr<bool, BoolExprNode>;
 
 pub enum BoolExprNode {
     Lit(bool),
-    Boxed(Box<dyn ExprNode<bool> + Send + Sync>),
+    Boxed(Box<dyn ExprNode<bool>>),
     UnaryOp {
         op: LogicUnaryOp,
         expr: BoolExpr,
@@ -41,7 +41,7 @@ pub enum BoolExprNode {
 }
 
 impl ExprNode<bool> for BoolExprNode {
-    fn eval(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
+    fn eval(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
         match self {
             BoolExprNode::Lit(lit) => Ok(lit.clone()),
             BoolExprNode::Boxed(value) => Ok(value.eval(ctx)?),
@@ -92,10 +92,10 @@ pub struct Compare<N, Nd> {
 
 impl<N, Nd> ExprNode<bool> for Compare<N, Nd>
 where
-    N: PartialOrd + Copy + Send + Sync + 'static,
-    Nd: ExprNode<N> + Send + Sync + 'static,
+    N: PartialOrd + Copy + 'static,
+    Nd: ExprNode<N> + 'static,
 {
-    fn eval(&self, ctx: &dyn EvalContext) -> Result<bool, ExpressionError> {
+    fn eval(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
         let l = self.lhs.eval_dyn(ctx)?;
         let r = self.rhs.eval_dyn(ctx)?;
         Ok(self.op.compare(&l, &r))
