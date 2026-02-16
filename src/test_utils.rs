@@ -1,7 +1,7 @@
 use crate::context::{AttributeKey, ReadContext, WriteContext};
 use crate::expr::{Expr, ExpressionError};
 use crate::float::{FloatExpr, FloatExprNode};
-use crate::frame::{Context, ExprAttribute};
+use crate::frame::ExprAttribute;
 use crate::integer::{IntExpr, IntExprNode};
 use smol_str::ToSmolStr;
 use std::any::{Any, TypeId};
@@ -30,12 +30,6 @@ impl MapContext {
             .entry("dst".into())
             .or_insert(HashMap::new())
             .insert(TypeId::of::<T>(), Box::new(value));
-    }
-}
-
-impl Context for MapContext {
-    fn commit(&mut self) {
-        todo!()
     }
 }
 

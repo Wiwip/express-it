@@ -3,7 +3,7 @@ use crate::expr::{Expr, ExprNode, ExpressionError};
 use std::any::Any;
 use std::collections::HashMap;
 
-pub trait Context: ReadContext + WriteContext {
+trait Context: ReadContext + WriteContext {
     fn commit(&mut self);
 }
 
@@ -16,7 +16,7 @@ pub struct Assignment<N, Nd: ExprNode<N>> {
     pub expr: Expr<N, Nd>,
 }
 
-pub trait Executor {
+trait Executor {
     fn run(&mut self, ctx: &mut dyn Context);
 }
 
@@ -35,7 +35,7 @@ pub struct ShadowContext<'a, Ctx> {
     shadow: &'a mut HashMap<AttributeKey, Box<dyn Any>>,
 }
 
-impl<Ctx: Context> Context for ShadowContext<'_, Ctx> {
+impl<Ctx: ReadContext + WriteContext> Context for ShadowContext<'_, Ctx> {
     fn commit(&mut self) {
         for (key, value) in self.shadow.drain() {
             self.ctx.write(&key, value);
@@ -135,7 +135,7 @@ impl LazyPlan {
     }
 
     /// Commit the expression plan
-    pub fn commit<Ctx: Context>(mut self, ctx: &mut Ctx) {
+    pub fn commit<Ctx: ReadContext + WriteContext>(mut self, ctx: &mut Ctx) {
         let mut shadow_view = ShadowContext {
             shadow: &mut self.shadow_buffer,
             ctx,
