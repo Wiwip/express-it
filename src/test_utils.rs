@@ -42,7 +42,7 @@ impl ReadContext for MapContext {
 
     fn get_any_component(
         &self,
-        _path: &str,
+        _path: ScopeId,
         _type_id: TypeId,
     ) -> Result<&dyn Any, ExpressionError> {
         unreachable!()
@@ -50,8 +50,9 @@ impl ReadContext for MapContext {
 }
 
 impl WriteContext for MapContext {
-    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) {
+    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) -> Result<(), ExpressionError> {
         self.0.insert(access.key(), value);
+        Ok(())
     }
 }
 

@@ -4,9 +4,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-trait Context: ReadContext + WriteContext {
-    fn commit(&mut self);
-}
+trait Context: ReadContext + WriteContext {}
 
 pub trait ExprAttribute {
     type Property: Debug;
@@ -17,11 +15,11 @@ pub struct Assignment<N, Nd: ExprNode<N>> {
     pub expr: Expr<N, Nd>,
 }
 
-trait Executor: Send + Sync {
-    fn run(&self, ctx: &mut dyn Context);
+trait StepExecutor: Send + Sync {
+    fn run(&self, read: &mut dyn Context);
 }
 
-impl<N: Send + Sync + 'static, Nd: ExprNode<N>> Executor for Assignment<N, Nd> {
+impl<N: Send + Sync + 'static, Nd: ExprNode<N>> StepExecutor for Assignment<N, Nd> {
     fn run(&self, ctx: &mut dyn Context) {
         let result = self.expr.inner.eval(ctx).unwrap_or_else(|_| {
             panic!(
@@ -29,65 +27,64 @@ impl<N: Send + Sync + 'static, Nd: ExprNode<N>> Executor for Assignment<N, Nd> {
                 self.path
             )
         });
-        ctx.write(&self.path, Box::new(result));
+        let _handle_error = ctx.write(&self.path, Box::new(result));
     }
 }
 
 /// A context with the purpose of intercepting read-write calls and provide temporary values
 /// Reads from the buffer first, and read from the real context if not present in the buffer.
 /// Writes-back to the world only when commit is called.
-pub struct ShadowContext<'a, Ctx> {
-    ctx: &'a mut Ctx,
+pub struct CachedEvalContext<'a, R> {
+    read_ctx: &'a R,
     shadow: HashMap<(ScopeId, u64), Box<dyn Any + Send + Sync>>,
 }
 
-impl<'a, Ctx> ShadowContext<'a, Ctx> {
-    pub fn new(ctx: &'a mut Ctx) -> Self {
+impl<'a, Ctx> CachedEvalContext<'a, Ctx> {
+    pub fn new(read_ctx: &'a Ctx) -> Self {
         Self {
-            ctx: ctx,
+            read_ctx,
             shadow: Default::default(),
         }
     }
-}
 
-impl<Ctx: ReadContext + WriteContext> Context for ShadowContext<'_, Ctx> {
-    fn commit(&mut self) {
-        for (key, value) in self.shadow.drain() {
-            let path = Path {
-                scope: key.0,
-                id: key.1,
-            };
-            self.ctx.write(&path, value);
+    pub fn write() {}
+
+    pub fn into_output(self) -> PlanResults {
+        PlanResults {
+            shadow: self.shadow,
         }
     }
 }
 
-impl<Ctx: ReadContext> ReadContext for ShadowContext<'_, Ctx> {
+impl<RW: ReadContext> Context for CachedEvalContext<'_, RW> {}
+
+impl<R: ReadContext> ReadContext for CachedEvalContext<'_, R> {
     fn get_any(&self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError> {
         if let Some(value) = self.shadow.get(&access.key()) {
             Ok(value.as_ref())
         } else {
-            self.ctx.get_any(access)
+            self.read_ctx.get_any(access)
         }
     }
 
     fn get_any_component(
         &self,
-        _path: &str,
+        _path: ScopeId,
         _type_id: std::any::TypeId,
     ) -> Result<&dyn Any, ExpressionError> {
         unreachable!()
     }
 }
 
-impl<Ctx: WriteContext> WriteContext for ShadowContext<'_, Ctx> {
-    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) {
+impl<W> WriteContext for CachedEvalContext<'_, W> {
+    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) -> Result<(), ExpressionError> {
         self.shadow.insert(access.key(), value);
+        Ok(())
     }
 }
 
 pub struct Step {
-    exprs: Vec<Box<dyn Executor>>,
+    exprs: Vec<Box<dyn StepExecutor>>,
 }
 
 impl<N, Nd> From<Assignment<N, Nd>> for Step
@@ -102,7 +99,7 @@ where
     }
 }
 
-impl Executor for Step {
+impl StepExecutor for Step {
     fn run(&self, ctx: &mut dyn Context) {
         for expr in &self.exprs {
             expr.run(ctx);
@@ -114,7 +111,7 @@ macro_rules! impl_step_from_tuple {
         ($($t:ident),+ $(,)?) => {
             impl<$($t),+> From<($($t,)+)> for Step
             where
-                $($t: Executor + 'static,)+
+                $($t: StepExecutor + 'static,)+
             {
                 #[allow(non_snake_case)]
                 fn from(value: ($($t,)+)) -> Step {
@@ -149,15 +146,46 @@ impl LazyPlan {
         self
     }
 
-    /// Commit the expression plan
-    pub fn commit<Ctx: ReadContext + WriteContext>(&self, ctx: &mut Ctx) {
-        let mut shadow_view = ShadowContext::new(ctx);
-        // Execute plan
+    /// Phase 1: evaluate using only a read context, producing an owned output buffer.
+    pub fn eval<R: ReadContext>(&self, read: &R) -> PlanResults {
+        let mut shadow_eval = CachedEvalContext::new(read);
+
         for step in &self.plan {
-            step.run(&mut shadow_view);
+            step.run(&mut shadow_eval);
         }
-        // Commit key/values from temp buffer to destination
-        shadow_view.commit();
+
+        shadow_eval.into_output()
+    }
+
+    /// Phase 2: flush buffered writes into a write context.
+    pub fn flush<W: WriteContext>(&self, output: PlanResults, write: &mut W) {
+        output.flush_into(write);
+    }
+
+    /// Commit the expression plan
+    pub fn commit<RW: ReadContext + WriteContext>(&self, ctx: &mut RW) {
+        let output = self.eval(ctx);
+        self.flush(output, ctx);
+    }
+}
+
+/// Owned result of evaluating a plan: a set of buffered writes.
+/// This is intentionally detached from the original read context so we can
+/// drop all read borrows before flushing into a write context.
+pub struct PlanResults {
+    shadow: HashMap<(ScopeId, u64), Box<dyn Any + Send + Sync>>,
+}
+
+impl PlanResults {
+    pub fn flush_into<W: WriteContext>(mut self, write: &mut W) {
+        for (key, value) in self.shadow.drain() {
+            let path = Path {
+                scope: key.0,
+                id: key.1,
+            };
+            println!("{:?}", path);
+            let _ = write.write(&path, value);
+        }
     }
 }
 

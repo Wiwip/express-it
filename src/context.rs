@@ -52,11 +52,11 @@ impl Accessor for Path {
 
 pub trait ReadContext {
     fn get_any(& self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError>;
-    fn get_any_component(&self, path: &str, type_id: TypeId) -> Result<&dyn Any, ExpressionError>;
+    fn get_any_component(&self, path: ScopeId, type_id: TypeId) -> Result<&dyn Any, ExpressionError>;
 }
 
 pub trait WriteContext {
-    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>);
+    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) -> Result<(), ExpressionError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
