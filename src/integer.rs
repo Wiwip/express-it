@@ -10,7 +10,7 @@ pub type IntExpr<N> = Expr<N, IntExprNode<N>>;
 
 impl<N> CompareExpr for IntExpr<N>
 where
-    N: PrimInt + CheckedNeg + 'static,
+    N: PrimInt + CheckedNeg + Send + Sync + 'static,
 {
     fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
@@ -45,7 +45,7 @@ pub enum IntExprNode<N> {
 
 impl<N> ExprNode<N> for IntExprNode<N>
 where
-    N: PrimInt + CheckedNeg + 'static,
+    N: PrimInt + CheckedNeg + Send + Sync + 'static,
 {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
         match self {

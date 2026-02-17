@@ -17,12 +17,12 @@ pub struct Assignment<N, Nd: ExprNode<N>> {
     pub expr: Expr<N, Nd>,
 }
 
-trait Executor {
-    fn run(&mut self, ctx: &mut dyn Context);
+trait Executor: Send + Sync {
+    fn run(&self, ctx: &mut dyn Context);
 }
 
-impl<N: 'static + Debug, Nd: ExprNode<N>> Executor for Assignment<N, Nd> {
-    fn run(&mut self, ctx: &mut dyn Context) {
+impl<N: Send + Sync + 'static, Nd: ExprNode<N>> Executor for Assignment<N, Nd> {
+    fn run(&self, ctx: &mut dyn Context) {
         let result = self.expr.inner.eval(ctx).unwrap_or_else(|_| {
             panic!(
                 "Executor failed. {} value could not be found in context.",
@@ -38,7 +38,16 @@ impl<N: 'static + Debug, Nd: ExprNode<N>> Executor for Assignment<N, Nd> {
 /// Writes-back to the world only when commit is called.
 pub struct ShadowContext<'a, Ctx> {
     ctx: &'a mut Ctx,
-    shadow: &'a mut HashMap<(ScopeId, u64), Box<dyn Any>>,
+    shadow: HashMap<(ScopeId, u64), Box<dyn Any + Send + Sync>>,
+}
+
+impl<'a, Ctx> ShadowContext<'a, Ctx> {
+    pub fn new(ctx: &'a mut Ctx) -> Self {
+        Self {
+            ctx: ctx,
+            shadow: Default::default(),
+        }
+    }
 }
 
 impl<Ctx: ReadContext + WriteContext> Context for ShadowContext<'_, Ctx> {
@@ -46,7 +55,7 @@ impl<Ctx: ReadContext + WriteContext> Context for ShadowContext<'_, Ctx> {
         for (key, value) in self.shadow.drain() {
             let path = Path {
                 scope: key.0,
-                path: key.1,
+                id: key.1,
             };
             self.ctx.write(&path, value);
         }
@@ -72,7 +81,7 @@ impl<Ctx: ReadContext> ReadContext for ShadowContext<'_, Ctx> {
 }
 
 impl<Ctx: WriteContext> WriteContext for ShadowContext<'_, Ctx> {
-    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any>) {
+    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) {
         self.shadow.insert(access.key(), value);
     }
 }
@@ -83,7 +92,7 @@ pub struct Step {
 
 impl<N, Nd> From<Assignment<N, Nd>> for Step
 where
-    N: 'static + Debug,
+    N: Send + Sync + 'static,
     Nd: ExprNode<N> + 'static,
 {
     fn from(value: Assignment<N, Nd>) -> Self {
@@ -94,8 +103,8 @@ where
 }
 
 impl Executor for Step {
-    fn run(&mut self, ctx: &mut dyn Context) {
-        for expr in &mut self.exprs {
+    fn run(&self, ctx: &mut dyn Context) {
+        for expr in &self.exprs {
             expr.run(ctx);
         }
     }
@@ -127,16 +136,12 @@ impl_step_from_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_step_from_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
 
 pub struct LazyPlan {
-    shadow_buffer: HashMap<(ScopeId, u64), Box<dyn Any>>,
     plan: Vec<Step>,
 }
 
 impl LazyPlan {
     pub fn new() -> Self {
-        Self {
-            shadow_buffer: Default::default(),
-            plan: vec![],
-        }
+        Self { plan: vec![] }
     }
 
     pub fn step(mut self, step: impl Into<Step>) -> Self {
@@ -145,13 +150,10 @@ impl LazyPlan {
     }
 
     /// Commit the expression plan
-    pub fn commit<Ctx: ReadContext + WriteContext>(mut self, ctx: &mut Ctx) {
-        let mut shadow_view = ShadowContext {
-            shadow: &mut self.shadow_buffer,
-            ctx,
-        };
+    pub fn commit<Ctx: ReadContext + WriteContext>(&self, ctx: &mut Ctx) {
+        let mut shadow_view = ShadowContext::new(ctx);
         // Execute plan
-        for step in &mut self.plan {
+        for step in &self.plan {
             step.run(&mut shadow_view);
         }
         // Commit key/values from temp buffer to destination
@@ -253,7 +255,8 @@ mod tests {
         ctx.insert::<Def>(DST, 2.0);
 
         let dmg_taken_expr = Atk::get(SRC) - Def::get(DST);
-        let get_dmg_taken: FloatExpr<f32> = FloatExprNode::Attribute(Path::from_name(DST, "dmg_taken")).into();
+        let get_dmg_taken: FloatExpr<f32> =
+            FloatExprNode::Attribute(Path::from_name(DST, "dmg_taken")).into();
 
         let lp = LazyPlan::new()
             .step(dmg_taken_expr.max(0.0).alias(DST, "dmg_taken"))
@@ -263,7 +266,7 @@ mod tests {
 
         let expr = FloatExprNode::<f32>::Attribute(Path::from_name(DST, "dmg_taken"));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 12.0);
+        assert_eq!(expr_result, 8.0);
 
         let expr = FloatExprNode::Attribute(Path::from_type::<Hp>(DST));
         let expr_result: f32 = expr.eval(&ctx).unwrap();

@@ -15,7 +15,7 @@ pub mod scopes {
 }
 
 #[derive(Default, Debug)]
-pub struct MapContext(pub HashMap<(ScopeId, u64), Box<dyn Any>>);
+pub struct MapContext(pub HashMap<(ScopeId, u64), Box<dyn Any + Send + Sync>>);
 
 impl MapContext {
     pub fn insert<T: ExprAttribute + 'static>(
@@ -27,9 +27,7 @@ impl MapContext {
     {
         let path = Path::from_type::<T>(scope);
 
-        self.0
-            .entry((path.scope(), path.path()))
-            .or_insert(Box::new(value));
+        self.0.insert((path.scope(), path.path()), Box::new(value));
     }
 }
 
@@ -52,7 +50,7 @@ impl ReadContext for MapContext {
 }
 
 impl WriteContext for MapContext {
-    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any>) {
+    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) {
         self.0.insert(access.key(), value);
     }
 }

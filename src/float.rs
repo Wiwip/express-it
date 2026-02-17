@@ -11,7 +11,7 @@ pub type FloatExpr<N> = Expr<N, FloatExprNode<N>>;
 
 impl<N> CompareExpr for FloatExpr<N>
 where
-    N: Float + 'static,
+    N: Float + Send + Sync + 'static,
 {
     fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr {
         let cmp = Compare {
@@ -54,7 +54,7 @@ macro_rules! float_unary {
     };
 }
 
-impl<N: Float + 'static> Expr<N, FloatExprNode<N>> {
+impl<N: Float + Send + Sync + 'static> Expr<N, FloatExprNode<N>> {
     fn unary_expr(self, op: FloatUnaryOp) -> Self {
         Expr::new(Arc::new(FloatExprNode::UnaryOp { op, expr: self }))
     }
@@ -79,13 +79,13 @@ impl<N: Float + 'static> Expr<N, FloatExprNode<N>> {
     }
 }
 
-impl<N: Float + 'static> Into<Expr<N, FloatExprNode<N>>> for FloatExprNode<N> {
+impl<N: Float + Send + Sync + 'static> Into<Expr<N, FloatExprNode<N>>> for FloatExprNode<N> {
     fn into(self) -> Expr<N, FloatExprNode<N>> {
         Expr::new(Arc::new(self))
     }
 }
 
-impl<N: Float + 'static> ExprNode<N> for FloatExprNode<N> {
+impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
         match self {
             FloatExprNode::Lit(lit) => Ok(lit.clone()),

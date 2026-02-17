@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub trait ExprNode<N> {
+pub trait ExprNode<N>: Send + Sync {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError>;
 }
 
@@ -34,8 +34,8 @@ where
 {
     pub fn as_<NOut, NdOut: ExprNode<NOut>>(&self) -> Expr<NOut, NdOut>
     where
-        NOut: Num + Copy + 'static,
-        N: AsPrimitive<NOut>,
+        NOut: Num + Copy + Send + Sync + 'static,
+        N: AsPrimitive<NOut> + Send + Sync,
         NdOut: ExprNode<NOut> + CastFrom<NOut>,
     {
         let cast_node = CastNumPrimitive::new(self.clone());
@@ -51,8 +51,7 @@ where
         self.inner.eval(ctx)
     }
 
-    pub fn alias(&self, scope: impl Into<ScopeId>, name: &str) -> Assignment<N, Nd>
-    {
+    pub fn alias(&self, scope: impl Into<ScopeId>, name: &str) -> Assignment<N, Nd> {
         Assignment {
             path: Path::from_name(scope, name),
             expr: Expr::new(self.inner.clone()),
@@ -60,10 +59,9 @@ where
     }
 }
 
-
 impl<N> Expr<N, FloatExprNode<N>>
 where
-    N: Float + 'static,
+    N: Float + Send + Sync + 'static,
     Self: From<N>,
 {
     pub fn min(self, rhs: N) -> Self {
@@ -93,7 +91,7 @@ where
 
 impl<N> Expr<N, IntExprNode<N>>
 where
-    N: PrimInt + CheckedNeg + 'static,
+    N: PrimInt + Send + Sync + CheckedNeg + 'static,
     Self: From<N>,
 {
     pub fn min(self, rhs: N) -> Self {

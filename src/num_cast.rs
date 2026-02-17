@@ -39,8 +39,8 @@ where
 
 impl<NIn, NOut, Nd> ExprNode<NOut> for CastNumPrimitive<NOut, NIn, Nd>
 where
-    NIn: AsPrimitive<NOut> + Copy,
-    NOut: Num + Copy + 'static,
+    NIn: AsPrimitive<NOut> + Send + Sync + Copy,
+    NOut: Num + Send + Sync + Copy + 'static,
     Nd: ExprNode<NIn> + 'static,
 {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<NOut, ExpressionError> {

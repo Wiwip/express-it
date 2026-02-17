@@ -92,7 +92,7 @@ pub struct Compare<N, Nd> {
 
 impl<N, Nd> ExprNode<bool> for Compare<N, Nd>
 where
-    N: PartialOrd + Copy + 'static,
+    N: PartialOrd + Send + Sync + Copy + 'static,
     Nd: ExprNode<N> + 'static,
 {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
