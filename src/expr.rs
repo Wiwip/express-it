@@ -1,7 +1,8 @@
 use crate::context::{Path, ReadContext, ScopeId};
-use crate::float::{FloatBinaryOp, FloatExprNode};
+use crate::float::{FloatBinaryOp, FloatExpr, FloatExprNode};
 use crate::frame::Assignment;
 use crate::integer::{IntBinaryOp, IntExprNode};
+use crate::logic::BoolExpr;
 use crate::num_cast::{CastFrom, CastNumPrimitive};
 use num_traits::{AsPrimitive, CheckedNeg, Float, Num, PrimInt};
 use std::error::Error;
@@ -10,6 +11,10 @@ use std::sync::Arc;
 
 pub trait ExprNode<N>: Send + Sync {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError>;
+}
+
+pub trait IfThenNode<N>: ExprNode<N> + Sized {
+    fn if_then(bool_expr: BoolExpr, t: Expr<N, Self>, f: Expr<N, Self>) -> Self;
 }
 
 #[derive(Default, Debug)]
@@ -86,6 +91,15 @@ where
             op: FloatBinaryOp::Pow,
             rhs_expr: rhs.into(),
         }))
+    }
+
+    pub fn unwrap_or(self, rhs: FloatExpr<N>) -> Self {
+        let node = FloatExprNode::ErrorHandlingOp {
+            expr: self,
+            or_expr: rhs,
+        };
+
+        Expr::new(Arc::new(node))
     }
 }
 

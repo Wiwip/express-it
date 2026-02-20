@@ -1,5 +1,9 @@
 use crate::context::ReadContext;
-use crate::expr::{Expr, ExprNode, ExpressionError};
+use crate::expr::{
+    Expr, ExprNode, ExpressionError, IfThenNode, SelectExprNode, SelectExprNodeImpl,
+};
+use num_traits::Num;
+use std::sync::Arc;
 
 pub trait CompareExpr: Sized {
     fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr;
@@ -25,6 +29,123 @@ pub trait CompareExpr: Sized {
 }
 
 pub type BoolExpr = Expr<bool, BoolExprNode>;
+
+impl BoolExpr {
+    pub fn true_() -> BoolExpr {
+        let node = BoolExprNode::Lit(true);
+        BoolExpr::new(Arc::new(node))
+    }
+
+    pub fn false_() -> BoolExpr {
+        let node = BoolExprNode::Lit(false);
+        BoolExpr::new(Arc::new(node))
+    }
+
+    pub fn if_then_else<N>(
+        self,
+        if_true_expr: impl Into<Expr<N, SelectExprNode<N>>>,
+        if_false_expr: impl Into<Expr<N, SelectExprNode<N>>>,
+    ) -> Expr<N, SelectExprNode<N>>
+    where
+        N: Num + SelectExprNodeImpl<Property = N> + Send + Sync + 'static,
+        SelectExprNode<N>: IfThenNode<N>,
+    {
+        // Convert once (avoid move errors from multiple `.into()` calls)
+        let bool_expr = self;
+        let t: Expr<N, SelectExprNode<N>> = if_true_expr.into();
+        let f: Expr<N, SelectExprNode<N>> = if_false_expr.into();
+
+        // Build the correct node type (int or float) via the trait, not via FloatExprNode directly
+        let node = <SelectExprNode<N> as IfThenNode<N>>::if_then(bool_expr, t, f);
+
+        Expr::<N, SelectExprNode<N>>::new(Arc::new(node))
+    }
+
+    pub fn then<N>(
+        self,
+        if_true_expr: impl Into<Expr<N, SelectExprNode<N>>>,
+    ) -> PartialConditional<N>
+    where
+        N: Num + SelectExprNodeImpl<Property = N> + Send + Sync + 'static,
+        SelectExprNode<N>: IfThenNode<N>,
+    {
+        PartialConditional {
+            bool_expr: self,
+            if_true_expr: if_true_expr.into(),
+        }
+    }
+
+    pub fn nand(self, other: BoolExpr) -> BoolExpr {
+        !(self & other)
+    }
+
+    pub fn nor(self, other: BoolExpr) -> BoolExpr {
+        !(self | other)
+    }
+
+    pub fn xnor(self, other: BoolExpr) -> BoolExpr {
+        !(self ^ other)
+    }
+
+    pub fn any(self) {
+        unimplemented!()
+    }
+
+    pub fn all() {
+        unimplemented!()
+    }
+}
+
+impl std::ops::Not for BoolExpr {
+    type Output = BoolExpr;
+
+    fn not(self) -> Self::Output {
+        let node = BoolExprNode::UnaryOp {
+            op: LogicUnaryOp::Not,
+            expr: self,
+        };
+        Expr::new(Arc::new(node))
+    }
+}
+
+impl std::ops::BitAnd for BoolExpr {
+    type Output = BoolExpr;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        let node = BoolExprNode::BinaryOp {
+            lhs: self,
+            op: LogicBinaryOp::And,
+            rhs,
+        };
+        Expr::new(Arc::new(node))
+    }
+}
+
+impl std::ops::BitOr for BoolExpr {
+    type Output = BoolExpr;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        let node = BoolExprNode::BinaryOp {
+            lhs: self,
+            op: LogicBinaryOp::Or,
+            rhs,
+        };
+        Expr::new(Arc::new(node))
+    }
+}
+
+impl std::ops::BitXor for BoolExpr {
+    type Output = BoolExpr;
+
+    fn bitxor(self, rhs: Self) -> Self::Output {
+        let node = BoolExprNode::BinaryOp {
+            lhs: self,
+            op: LogicBinaryOp::Xor,
+            rhs,
+        };
+        Expr::new(Arc::new(node))
+    }
+}
 
 pub enum BoolExprNode {
     Lit(bool),
@@ -114,17 +235,41 @@ pub enum LogicBinaryOp {
     Xor,
 }
 
+pub struct PartialConditional<N: SelectExprNodeImpl> {
+    pub bool_expr: BoolExpr,
+    pub if_true_expr: Expr<N, SelectExprNode<N>>,
+}
+
+impl<N> PartialConditional<N>
+where
+    N: Num + Send + Sync + 'static + SelectExprNodeImpl<Property = N>,
+    SelectExprNode<N>: IfThenNode<N>,
+{
+    pub fn otherwise(
+        self,
+        if_false_expr: impl Into<Expr<N, SelectExprNode<N>>>,
+    ) -> Expr<N, SelectExprNode<N>> {
+        let node = <SelectExprNode<N> as IfThenNode<N>>::if_then(
+            self.bool_expr,
+            self.if_true_expr,
+            if_false_expr.into(),
+        );
+
+        Expr::<N, SelectExprNode<N>>::new(Arc::new(node))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::logic::CompareExpr;
-    use crate::test_utils::{F32Attribute, I32Attribute, MapContext};
+    use crate::logic::{BoolExpr, CompareExpr};
     use crate::test_utils::scopes::{DST, SRC};
+    use crate::test_utils::{Atk, F32Attribute, Hp, I32Attribute, MapContext};
 
     #[test]
     fn test_float_logic() {
         let mut ctx = MapContext::default();
         ctx.insert::<F32Attribute>(SRC, 1500.0);
-        ctx.insert::<F32Attribute>(DST,0.0);
+        ctx.insert::<F32Attribute>(DST, 0.0);
         ctx.insert::<I32Attribute>(DST, 0);
 
         let expr = F32Attribute::src().gt(F32Attribute::dst());
@@ -151,6 +296,10 @@ mod tests {
         let is_greater = expr.eval(&ctx).unwrap();
         assert_eq!(is_greater, 1500 > 0);
 
+        let expr = !I32Attribute::src().gt(I32Attribute::dst());
+        let is_greater = expr.eval(&ctx).unwrap();
+        assert_eq!(is_greater, !(1500 > 0));
+
         let expr = I32Attribute::dst().lt(I32Attribute::src());
         let is_lower = expr.eval(&ctx).unwrap();
         assert_eq!(is_lower, 0 < 1500);
@@ -158,5 +307,166 @@ mod tests {
         let expr = I32Attribute::dst().eq(F32Attribute::dst().as_());
         let is_equal = expr.eval(&ctx).unwrap();
         assert_eq!(is_equal, true);
+    }
+
+    #[test]
+    fn test_selector_logic() {
+        let mut ctx = MapContext::default();
+        ctx.insert::<Atk>(SRC, 10.0);
+        ctx.insert::<Hp>(SRC, 20.0);
+
+        let select_atk_expr = Atk::get(SRC).gt(15.0);
+        let select_def_expr = Hp::get(SRC).gt(15.0);
+
+        let expr_result = select_atk_expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, false);
+        // If Atk greater than 15.0, return 50.0 else return 100.0
+        let expr_result = select_atk_expr
+            .clone()
+            .if_then_else(50.0, 100.0)
+            .eval(&ctx)
+            .unwrap();
+        assert_eq!(expr_result, 100.0);
+        let expr_result = select_atk_expr
+            .then(50.0)
+            .otherwise(100.0)
+            .eval(&ctx)
+            .unwrap();
+        assert_eq!(expr_result, 100.0);
+
+        let expr_result = select_def_expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, true);
+        // If Def greater than 15.0, return 150.0 else return 550.0
+        let expr_result = select_def_expr
+            .clone()
+            .if_then_else(150.0, 550.0)
+            .eval(&ctx)
+            .unwrap();
+        assert_eq!(expr_result, 150.0);
+
+        let expr_result = select_def_expr
+            .then(150.0)
+            .otherwise(550.0)
+            .eval(&ctx)
+            .unwrap();
+        assert_eq!(expr_result, 150.0);
+    }
+
+    #[test]
+    fn test_and() {
+        let ctx = MapContext::default();
+
+        let t = BoolExpr::true_();
+        let f = BoolExpr::false_();
+
+        // (A, B) → expected
+        let cases = [
+            (f.clone(), f.clone(), false),
+            (f.clone(), t.clone(), false),
+            (t.clone(), f.clone(), false),
+            (t.clone(), t.clone(), true),
+        ];
+
+        for (a, b, expected) in cases {
+            let result = (a & b).eval(&ctx).unwrap();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_or() {
+        let ctx = MapContext::default();
+
+        let t = BoolExpr::true_();
+        let f = BoolExpr::false_();
+
+        let cases = [
+            (f.clone(), f.clone(), false),
+            (f.clone(), t.clone(), true),
+            (t.clone(), f.clone(), true),
+            (t.clone(), t.clone(), true),
+        ];
+
+        for (a, b, expected) in cases {
+            let result = (a | b).eval(&ctx).unwrap();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_xor() {
+        let ctx = MapContext::default();
+
+        let t = BoolExpr::true_();
+        let f = BoolExpr::false_();
+
+        let cases = [
+            (f.clone(), f.clone(), false),
+            (f.clone(), t.clone(), true),
+            (t.clone(), f.clone(), true),
+            (t.clone(), t.clone(), false),
+        ];
+
+        for (a, b, expected) in cases {
+            let result = (a ^ b).eval(&ctx).unwrap();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_nand() {
+        let ctx = MapContext::default();
+        let t = BoolExpr::true_();
+        let f = BoolExpr::false_();
+
+        let cases = [
+            (f.clone(), f.clone(), true),
+            (f.clone(), t.clone(), true),
+            (t.clone(), f.clone(), true),
+            (t.clone(), t.clone(), false),
+        ];
+
+        for (a, b, expected) in cases {
+            let result = a.nand(b).eval(&ctx).unwrap();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_nor() {
+        let ctx = MapContext::default();
+        let t = BoolExpr::true_();
+        let f = BoolExpr::false_();
+
+        let cases = [
+            (f.clone(), f.clone(), true),
+            (f.clone(), t.clone(), false),
+            (t.clone(), f.clone(), false),
+            (t.clone(), t.clone(), false),
+        ];
+
+        for (a, b, expected) in cases {
+            let result = a.nor(b).eval(&ctx).unwrap();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_xnor() {
+        let ctx = MapContext::default();
+        let t = BoolExpr::true_();
+        let f = BoolExpr::false_();
+
+        let cases = [
+            (f.clone(), f.clone(), true),
+            (f.clone(), t.clone(), false),
+            (t.clone(), f.clone(), false),
+            (t.clone(), t.clone(), true),
+        ];
+
+        for (a, b, expected) in cases {
+            let result = a.xnor(b).eval(&ctx).unwrap();
+            assert_eq!(result, expected);
+        }
     }
 }

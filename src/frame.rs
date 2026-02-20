@@ -183,7 +183,6 @@ impl PlanResults {
                 scope: key.0,
                 id: key.1,
             };
-            println!("{:?}", path);
             let _ = write.write(&path, value);
         }
     }
@@ -191,68 +190,12 @@ impl PlanResults {
 
 #[cfg(test)]
 mod tests {
-    use crate::context::{Path, ScopeId};
-    use crate::expr::{Expr, ExprNode};
+    use crate::context::Path;
+    use crate::expr::ExprNode;
     use crate::float::{FloatExpr, FloatExprNode};
-    use crate::frame::{Assignment, ExprAttribute, LazyPlan};
-    use crate::test_utils::MapContext;
+    use crate::frame::LazyPlan;
     use crate::test_utils::scopes::{DST, SRC};
-    use std::sync::Arc;
-
-    struct Atk;
-    impl Atk {
-        #[allow(dead_code)]
-        pub fn set(
-            key: impl Into<ScopeId>,
-            expr: FloatExpr<f32>,
-        ) -> Assignment<f32, FloatExprNode<f32>> {
-            let path = Path::from_type::<Self>(key.into());
-            Assignment { path, expr }
-        }
-        pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
-            let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
-            Expr::new(Arc::new(expr))
-        }
-    }
-    impl ExprAttribute for Atk {
-        type Property = f32;
-    }
-
-    struct Def;
-    impl Def {
-        #[allow(dead_code)]
-        pub fn set(
-            key: impl Into<ScopeId>,
-            expr: FloatExpr<f32>,
-        ) -> Assignment<f32, FloatExprNode<f32>> {
-            let path = Path::from_type::<Self>(key.into());
-            Assignment { path, expr }
-        }
-        pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
-            let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
-            Expr::new(Arc::new(expr))
-        }
-    }
-    impl ExprAttribute for Def {
-        type Property = f32;
-    }
-    struct Hp;
-    impl Hp {
-        pub fn set(
-            key: impl Into<ScopeId>,
-            expr: FloatExpr<f32>,
-        ) -> Assignment<f32, FloatExprNode<f32>> {
-            let path = Path::from_type::<Self>(key.into());
-            Assignment { path, expr }
-        }
-        pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
-            let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
-            Expr::new(Arc::new(expr))
-        }
-    }
-    impl ExprAttribute for Hp {
-        type Property = f32;
-    }
+    use crate::test_utils::{Atk, Def, Hp, MapContext};
 
     #[test]
     fn test_sequential_ops() {

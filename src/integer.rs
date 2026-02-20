@@ -1,5 +1,5 @@
 use crate::context::{Path, ReadContext};
-use crate::expr::{Expr, ExprNode, ExpressionError};
+use crate::expr::{Expr, ExprNode, ExpressionError, IfThenNode};
 use crate::impl_int_binary_ops;
 use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
 use crate::num_cast::CastFrom;
@@ -41,6 +41,15 @@ pub enum IntExprNode<N> {
         arg1_expr: IntExpr<N>,
         arg2_expr: IntExpr<N>,
     },
+    IfThenElseOp {
+        bool_expr: BoolExpr,
+        arg1_expr: IntExpr<N>,
+        arg2_expr: IntExpr<N>,
+    },
+    ErrorHandlingOp {
+        expr: IntExpr<N>,
+        or_expr: IntExpr<N>,
+    }
 }
 
 impl<N> ExprNode<N> for IntExprNode<N>
@@ -49,7 +58,7 @@ where
 {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
         match self {
-            IntExprNode::Lit(lit) => Ok(lit.clone()),
+            IntExprNode::Lit(lit) => Ok(*lit),
             IntExprNode::Attribute(key) => {
                 let value = ctx.get_any(key)?;
 
@@ -59,7 +68,7 @@ where
                     Err(ExpressionError::InvalidTypes)
                 }
             }
-            IntExprNode::Cast(cast) => Ok(cast.eval(ctx)?),
+            IntExprNode::Cast(cast) => cast.eval(ctx),
             IntExprNode::UnaryOp { op, expr } => match op {
                 IntUnaryOp::Neg => expr
                     .eval_dyn(ctx)?
@@ -86,6 +95,24 @@ where
                 let arg2 = arg2_expr.eval_dyn(ctx)?;
                 op.eval(value, arg1, arg2)
             }
+            IntExprNode::IfThenElseOp {
+                bool_expr,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let bool_result = bool_expr.eval_dyn(ctx)?;
+                if bool_result {
+                    arg1_expr.eval_dyn(ctx)
+                } else {
+                    arg2_expr.eval_dyn(ctx)
+                }
+            }
+            IntExprNode::ErrorHandlingOp { expr, or_expr } => {
+                match expr.eval_dyn(ctx) {
+                    Ok(v) => Ok(v),
+                    Err(_) => or_expr.eval_dyn(ctx),
+                }
+            }
         }
     }
 }
@@ -110,6 +137,19 @@ impl<N: PrimInt + CheckedNeg + Send + Sync + 'static> Expr<N, IntExprNode<N>> {
             arg1_expr: min.into(),
             arg2_expr: max.into(),
         }))
+    }
+}
+
+impl<N> IfThenNode<N> for IntExprNode<N>
+where
+    N: PrimInt + CheckedNeg + Send + Sync + 'static,
+{
+    fn if_then(bool_expr: BoolExpr, t: Expr<N, Self>, f: Expr<N, Self>) -> Self {
+        IntExprNode::IfThenElseOp {
+            bool_expr,
+            arg1_expr: t.into(),
+            arg2_expr: f.into(),
+        }
     }
 }
 

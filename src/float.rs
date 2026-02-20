@@ -1,5 +1,5 @@
 use crate::context::{Path, ReadContext};
-use crate::expr::{Expr, ExprNode, ExpressionError};
+use crate::expr::{Expr, ExprNode, ExpressionError, IfThenNode};
 use crate::impl_float_binary_ops;
 use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
 use crate::num_cast::CastFrom;
@@ -42,6 +42,15 @@ pub enum FloatExprNode<N> {
         arg1_expr: FloatExpr<N>,
         arg2_expr: FloatExpr<N>,
     },
+    IfThenOp {
+        bool_expr: BoolExpr,
+        arg1_expr: FloatExpr<N>,
+        arg2_expr: FloatExpr<N>,
+    },
+    ErrorHandlingOp {
+        expr: FloatExpr<N>,
+        or_expr: FloatExpr<N>,
+    }
 }
 
 macro_rules! float_unary {
@@ -88,7 +97,7 @@ impl<N: Float + Send + Sync + 'static> Into<Expr<N, FloatExprNode<N>>> for Float
 impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
         match self {
-            FloatExprNode::Lit(lit) => Ok(lit.clone()),
+            FloatExprNode::Lit(lit) => Ok(*lit),
             FloatExprNode::Attribute(key) => {
                 let value = ctx.get_any(key)?;
 
@@ -98,9 +107,9 @@ impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
                     Err(ExpressionError::InvalidTypes)
                 }
             }
-            FloatExprNode::Cast(cast) => Ok(cast.eval(ctx)?),
+            FloatExprNode::Cast(cast) => cast.eval(ctx),
             FloatExprNode::UnaryOp { op, expr } => {
-                let value = expr.inner.eval(ctx)?;
+                let value = expr.eval_dyn(ctx)?;
                 op.eval(value)
             }
             FloatExprNode::BinaryOp {
@@ -123,6 +132,37 @@ impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
                 let arg2 = arg2_expr.eval_dyn(ctx)?;
                 op.eval(value, arg1, arg2)
             }
+            FloatExprNode::IfThenOp {
+                bool_expr,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let bool_result = bool_expr.eval_dyn(ctx)?;
+                if bool_result {
+                    arg1_expr.eval_dyn(ctx)
+                } else {
+                    arg2_expr.eval_dyn(ctx)
+                }
+            }
+            FloatExprNode::ErrorHandlingOp { expr, or_expr } => {
+                match expr.eval_dyn(ctx) {
+                    Ok(v) => Ok(v),
+                    Err(_) => or_expr.eval_dyn(ctx),
+                }
+            }
+        }
+    }
+}
+
+impl<N> IfThenNode<N> for FloatExprNode<N>
+where
+    N: Float + Send + Sync + 'static,
+{
+    fn if_then(bool_expr: BoolExpr, t: Expr<N, Self>, f: Expr<N, Self>) -> Self {
+        FloatExprNode::IfThenOp {
+            bool_expr,
+            arg1_expr: t.into(),
+            arg2_expr: f.into(),
         }
     }
 }
@@ -251,6 +291,14 @@ impl FloatTrinaryOp {
         Ok(result)
     }
 }
+
+pub struct FloatSelector<N, Nd> {
+    pub lhs: Expr<N, Nd>,
+    pub op: BoolExpr,
+    pub rhs: Expr<N, Nd>,
+}
+
+impl<N, Nd> FloatSelector<N, Nd> {}
 
 #[cfg(test)]
 mod tests {

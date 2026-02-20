@@ -1,7 +1,7 @@
 use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
 use crate::expr::{Expr, ExpressionError};
 use crate::float::{FloatExpr, FloatExprNode};
-use crate::frame::ExprAttribute;
+use crate::frame::{Assignment, ExprAttribute};
 use crate::integer::{IntExpr, IntExprNode};
 use crate::test_utils::scopes::{DST, SRC};
 use std::any::{Any, TypeId};
@@ -50,7 +50,11 @@ impl ReadContext for MapContext {
 }
 
 impl WriteContext for MapContext {
-    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) -> Result<(), ExpressionError> {
+    fn write(
+        &mut self,
+        access: &dyn Accessor,
+        value: Box<dyn Any + Send + Sync>,
+    ) -> Result<(), ExpressionError> {
         self.0.insert(access.key(), value);
         Ok(())
     }
@@ -115,4 +119,63 @@ impl U32Attribute {
 
 impl ExprAttribute for U32Attribute {
     type Property = u32;
+}
+
+pub struct Atk;
+
+impl Atk {
+    #[allow(dead_code)]
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: FloatExpr<f32>,
+    ) -> Assignment<f32, FloatExprNode<f32>> {
+        let path = Path::from_type::<Self>(key.into());
+        Assignment { path, expr }
+    }
+    pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
+        let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
+        Expr::new(Arc::new(expr))
+    }
+}
+impl ExprAttribute for Atk {
+    type Property = f32;
+}
+
+pub struct Def;
+
+impl Def {
+    #[allow(dead_code)]
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: FloatExpr<f32>,
+    ) -> Assignment<f32, FloatExprNode<f32>> {
+        let path = Path::from_type::<Self>(key.into());
+        Assignment { path, expr }
+    }
+    pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
+        let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
+        Expr::new(Arc::new(expr))
+    }
+}
+impl ExprAttribute for Def {
+    type Property = f32;
+}
+
+pub struct Hp;
+
+impl Hp {
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: FloatExpr<f32>,
+    ) -> Assignment<f32, FloatExprNode<f32>> {
+        let path = Path::from_type::<Self>(key.into());
+        Assignment { path, expr }
+    }
+    pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
+        let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
+        Expr::new(Arc::new(expr))
+    }
+}
+impl ExprAttribute for Hp {
+    type Property = f32;
 }
