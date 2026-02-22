@@ -1,6 +1,6 @@
 use crate::context::{Path, ReadContext};
 use crate::expr::{Expr, ExprNode, ExpressionError, IfThenNode, SelectExprNodeImpl};
-use crate::logic::{BoolExpr};
+use crate::logic::BoolExpr;
 use crate::num_cast::CastFrom;
 use num_traits::Float;
 use std::fmt::Debug;
@@ -225,95 +225,104 @@ pub struct FloatSelector<N: SelectExprNodeImpl> {
     pub op: BoolExpr,
     pub rhs: Expr<N>,
 }
-
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::expr::ExpressionError;
     use crate::test_utils::scopes::{DST, ERROR_SCOPE, SRC};
     use crate::test_utils::{Atk, Hp, MapContext};
-    use num_traits::Float;
     use std::ops::Neg;
 
-    #[test]
-    fn test_unary_ops() {
-        let mut ctx = MapContext::default();
-        // Destination
-        ctx.insert::<Hp>(SRC, 150.0);
-
-        let expr = Hp::get(SRC).neg();
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, -150.0);
+    // Helper for float comparisons if needed
+    fn assert_near(a: f32, b: f32) {
+        assert!((a - b).abs() < 1e-6, "Left: {}, Right: {}", a, b);
     }
 
     #[test]
-    fn test_binary_ops() {
+    fn test_float_unary_ops() {
         let mut ctx = MapContext::default();
-        // Destination
-        ctx.insert::<Hp>(DST, 150.0);
+        ctx.insert::<Hp>(SRC, 16.0);
 
-        // Source
+        // Testing basic negation
+        assert_eq!(Hp::get(SRC).neg().eval(&ctx).unwrap(), -16.0);
+
+        // Testing Trig functions
+        assert_near(Hp::get(SRC).sin().eval(&ctx).unwrap(), 16.0.sin());
+
+        // Testing Math functions
+        assert_eq!(Hp::get(SRC).sqrt().eval(&ctx).unwrap(), 4.0);
+        assert_eq!(Hp::get(SRC).abs().eval(&ctx).unwrap(), 16.0);
+
+        ctx.insert::<Atk>(SRC, 2.7);
+        assert_eq!(Atk::get(SRC).floor().eval(&ctx).unwrap(), 2.0);
+        assert_eq!(Atk::get(SRC).ceil().eval(&ctx).unwrap(), 3.0);
+    }
+
+    #[test]
+    fn test_float_binary_ops_standard() {
+        let mut ctx = MapContext::default();
+        ctx.insert::<Hp>(DST, 150.0);
         ctx.insert::<Atk>(SRC, 50.0);
 
-        let expr = Hp::get(DST) - Atk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 150.0 - 50.0);
-
-        let expr = Hp::get(DST) + Atk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 150.0 + 50.0);
-
-        let expr = Hp::get(DST) * Atk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 150.0 * 50.0);
-
-        let expr = Hp::get(DST) / Atk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 150.0 / 50.0);
+        // Basic operators (assuming operator overloading is implemented)
+        assert_eq!((Hp::get(DST) + Atk::get(SRC)).eval(&ctx).unwrap(), 200.0);
+        assert_eq!((Hp::get(DST) - Atk::get(SRC)).eval(&ctx).unwrap(), 100.0);
+        assert_eq!((Hp::get(DST) * Atk::get(SRC)).eval(&ctx).unwrap(), 7500.0);
+        assert_eq!((Hp::get(DST) / Atk::get(SRC)).eval(&ctx).unwrap(), 3.0);
+        assert_eq!((Hp::get(DST) % Atk::get(SRC)).eval(&ctx).unwrap(), 0.0);
     }
 
     #[test]
-    fn test_trig_ops() {
+    fn test_float_binary_ops_extended() {
         let mut ctx = MapContext::default();
-        // Destination
-        ctx.insert::<Hp>(DST, 150.0);
+        ctx.insert::<Atk>(SRC, 2.0);
+        ctx.insert::<Atk>(DST, 10.0);
 
-        // Source
-        ctx.insert::<Atk>(SRC, 50.0);
+        // Testing .pow() as a method on Expr<N>
+        // 2.0 ^ 3.0 = 8.0
+        assert_eq!(Atk::get(SRC).pow(3.0).eval(&ctx).unwrap(), 8.0);
 
-        let expr = Hp::get(DST).sin() + Atk::get(SRC).cos();
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 150.0.sin() + 50.0.cos());
+        // Testing .min() and .max()
+        assert_eq!(Atk::get(SRC).min(Atk::get(DST)).eval(&ctx).unwrap(), 2.0);
+        assert_eq!(Atk::get(SRC).max(Atk::get(DST)).eval(&ctx).unwrap(), 10.0);
+
+        // Fractional power (equivalent to sqrt)
+        ctx.insert::<Hp>(SRC, 25.0);
+        assert_near(Hp::get(SRC).pow(0.5).eval(&ctx).unwrap(), 5.0);
     }
 
     #[test]
-    fn test_cast_op() {
+    fn test_float_trinary_ops_clamp() {
         let mut ctx = MapContext::default();
-        // Source
-        ctx.insert::<Hp>(DST, 49.0);
-        ctx.insert::<Atk>(SRC, 1500.0);
+        ctx.insert::<Atk>(SRC, 150.0);
+        ctx.insert::<Hp>(SRC, 50.0);
 
-        let expr = Hp::get(DST) + Atk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 1500.0 + 49.0);
+        // Hardcoded bounds
+        assert_eq!(Atk::get(SRC).clamp(0.0, 100.0).eval(&ctx).unwrap(), 100.0);
 
-        let expr = Atk::get(SRC) - Hp::get(DST);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 1500.0 - 49.0);
+        // Dynamic bounds using other expressions
+        ctx.insert::<Atk>(DST, 20.0); // min
+        ctx.insert::<Hp>(DST, 30.0);  // max
+        // clamp 50 between 20 and 30 -> 30
+        assert_eq!(Hp::get(SRC).clamp(Atk::get(DST), Hp::get(DST)).eval(&ctx).unwrap(), 30.0);
     }
 
     #[test]
-    fn test_error_ops() {
+    fn test_float_logic_and_errors() {
         let mut ctx = MapContext::default();
-        // Source
         ctx.insert::<Atk>(SRC, 0.0);
-        ctx.insert::<Atk>(DST, 1500.0);
+        ctx.insert::<Atk>(DST, 10.0);
 
-        let expr = Atk::get(DST) / Atk::get(SRC); // Div by 0
-        let expr_result = expr.eval(&ctx);
-        assert_eq!(expr_result, Ok(f32::INFINITY));
+        // Division by zero in floats = Infinity
+        let div_zero = Atk::get(DST) / Atk::get(SRC);
+        assert_eq!(div_zero.eval(&ctx).unwrap(), f32::INFINITY);
 
-        let expr = Atk::get(ERROR_SCOPE);
-        let expr_result = expr.eval(&ctx);
-        assert_eq!(expr_result, Err(ExpressionError::MissingAttribute));
+        // Error Handling (Fallback)
+        let expr = Atk::get(ERROR_SCOPE).unwrap_or(Atk::get(DST));
+        assert_eq!(expr.eval(&ctx).unwrap(), 10.0);
+
+        // Missing Attribute Error
+        let missing = Atk::get(ERROR_SCOPE);
+        assert_eq!(missing.eval(&ctx), Err(ExpressionError::MissingAttribute));
     }
 }

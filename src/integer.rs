@@ -3,7 +3,6 @@ use crate::expr::{Expr, ExprNode, ExpressionError, IfThenNode, SelectExprNodeImp
 use crate::logic::BoolExpr;
 use crate::num_cast::CastFrom;
 use num_traits::{CheckedNeg, PrimInt};
-use std::sync::Arc;
 
 pub enum IntExprNode<N: SelectExprNodeImpl> {
     Lit(N),
@@ -95,25 +94,6 @@ where
                 Err(_) => or_expr.eval_dyn(ctx),
             },
         }
-    }
-}
-
-impl<
-    N: PrimInt
-        + CheckedNeg
-        + SelectExprNodeImpl<Property = N, Node = IntExprNode<N>>
-        + Send
-        + Sync
-        + 'static,
-> Expr<N>
-{
-    pub fn clamp(self, min: impl Into<Self>, max: impl Into<Self>) -> Self {
-        Expr::new(Arc::new(IntExprNode::TrinaryOp {
-            value_expr: self,
-            op: IntTrinaryOp::Clamp,
-            arg1_expr: min.into(),
-            arg2_expr: max.into(),
-        }))
     }
 }
 
@@ -226,77 +206,113 @@ impl IntTrinaryOp {
 
 #[cfg(test)]
 mod tests {
-    use crate::expr::ExpressionError;
-    use crate::test_utils::scopes::{DST, ERROR_SCOPE, SRC};
-    use crate::test_utils::{IntAtk, IntDef, IntHp, MapContext};
     use std::ops::Neg;
+    use crate::test_utils::{IntAtk, IntDef, IntHp, MapContext};
+    use crate::test_utils::scopes::{DST, ERROR_SCOPE, SRC};
+    use super::*;
 
     #[test]
     fn test_unary_ops() {
         let mut ctx = MapContext::default();
-        // Destination
         ctx.insert::<IntDef>(SRC, 150);
 
         let expr = IntDef::get(SRC).neg();
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, -150);
+
+        // Edge Case: Testing checked_neg overflow.
+        // Note: For standard i32/i64, negating MIN causes an overflow.
+        ctx.insert::<IntDef>(DST, i32::MIN);
+        let overflow_expr = IntDef::get(DST).neg();
+
+        let err_result = overflow_expr.eval(&ctx);
+        assert_eq!(err_result, Err(ExpressionError::InvalidOperationNeg));
     }
 
     #[test]
-    fn test_binary_ops() {
+    fn test_binary_ops_standard() {
         let mut ctx = MapContext::default();
-        // Destination
         ctx.insert::<IntHp>(DST, 150);
+        ctx.insert::<IntAtk>(SRC, 40);
 
-        // Source
-        ctx.insert::<IntAtk>(SRC, 50);
-
-        let expr = IntHp::get(DST) - IntAtk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 150 - 50);
-
-        let expr = IntHp::get(DST) + IntAtk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 150 + 50);
-
-        let expr = IntHp::get(DST) * IntAtk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 150 * 50);
-
-        let expr = IntHp::get(DST) / IntAtk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 150 / 50);
+        assert_eq!(
+            (IntHp::get(DST) + IntAtk::get(SRC)).eval(&ctx).unwrap(),
+            190
+        );
+        assert_eq!(
+            (IntHp::get(DST) - IntAtk::get(SRC)).eval(&ctx).unwrap(),
+            110
+        );
+        assert_eq!(
+            (IntHp::get(DST) * IntAtk::get(SRC)).eval(&ctx).unwrap(),
+            6000
+        );
+        assert_eq!((IntHp::get(DST) / IntAtk::get(SRC)).eval(&ctx).unwrap(), 3);
+        assert_eq!((IntHp::get(DST) % IntAtk::get(SRC)).eval(&ctx).unwrap(), 30);
     }
 
     #[test]
-    fn test_cast_op() {
+    fn test_int_binary_ops_extended() {
         let mut ctx = MapContext::default();
-        // Source
-        ctx.insert::<IntHp>(DST, 49);
-        ctx.insert::<IntAtk>(SRC, 1500);
+        ctx.insert::<IntAtk>(SRC, 10);
+        ctx.insert::<IntAtk>(DST, 20);
 
-        let expr = IntHp::get(DST) + IntAtk::get(SRC);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 1500 + 49);
+        // Testing Min: min(10, 20) -> 10
+        let min_expr = IntAtk::get(SRC).min(IntAtk::get(DST));
+        assert_eq!(min_expr.eval(&ctx).unwrap(), 10);
 
-        let expr = IntAtk::get(SRC) - IntHp::get(DST);
-        let expr_result = expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, 1500 - 49);
+        // Testing Max: max(10, 20) -> 20
+        let max_expr = IntAtk::get(SRC).max(IntAtk::get(DST));
+        assert_eq!(max_expr.eval(&ctx).unwrap(), 20);
+
+        // Testing Pow: 2 ^ 3 -> 8
+        // Note: If your .pow() takes a literal, it likely uses Into<Expr<N>>
+        ctx.insert::<IntDef>(SRC, 2);
+        let pow_expr = IntDef::get(SRC).pow(3);
+        assert_eq!(pow_expr.eval(&ctx).unwrap(), 8);
     }
 
     #[test]
-    fn test_error_ops() {
+    fn test_trinary_ops_clamp() {
         let mut ctx = MapContext::default();
-        // Source
+        ctx.insert::<IntDef>(DST, 150); // Value to clamp
+
+        // Clamp 150 between 0 and 100 -> Should be 100
+        let expr = IntDef::get(DST).clamp(0, 100);
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 100);
+
+        ctx.insert::<IntDef>(SRC, -50);
+        // Clamp -50 between 0 and 100 -> Should be 0
+        let expr_low = IntDef::get(SRC).clamp(0, 100);
+        assert_eq!(expr_low.eval(&ctx).unwrap(), 0);
+    }
+    #[test]
+    fn test_error_handling_op() {
+        let mut ctx = MapContext::default();
+        ctx.insert::<IntAtk>(SRC, 999); // Fallback value
+
+        let expr = IntAtk::get(ERROR_SCOPE).unwrap_or(IntAtk::get(SRC));
+
+        let expr_result = expr.eval(&ctx).unwrap();
+        assert_eq!(expr_result, 999);
+    }
+
+    #[test]
+    fn test_evaluation_errors() {
+        let mut ctx = MapContext::default();
         ctx.insert::<IntAtk>(SRC, 0);
         ctx.insert::<IntAtk>(DST, 1500);
 
-        let expr = IntAtk::get(DST) / IntAtk::get(SRC); // Div by 0
-        let expr_result = expr.eval(&ctx);
-        assert_eq!(expr_result, Err(ExpressionError::DivisionByZero));
+        // Division by Zero
+        let expr_div = IntAtk::get(DST) / IntAtk::get(SRC);
+        assert_eq!(expr_div.eval(&ctx), Err(ExpressionError::DivisionByZero));
 
-        let expr = IntAtk::get(ERROR_SCOPE);
-        let expr_result = expr.eval(&ctx);
-        assert_eq!(expr_result, Err(ExpressionError::MissingAttribute));
+        // Missing Attribute
+        let expr_missing = IntAtk::get(ERROR_SCOPE);
+        assert_eq!(
+            expr_missing.eval(&ctx),
+            Err(ExpressionError::MissingAttribute)
+        );
     }
 }

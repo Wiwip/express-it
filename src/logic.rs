@@ -61,10 +61,7 @@ impl BoolExpr {
         Expr::<N>::new(Arc::new(node))
     }
 
-    pub fn then<N>(
-        self,
-        if_true_expr: impl Into<Expr<N>>,
-    ) -> PartialConditional<N>
+    pub fn then<N>(self, if_true_expr: impl Into<Expr<N>>) -> PartialConditional<N>
     where
         N: Num + SelectExprNodeImpl<Property = N> + Send + Sync + 'static,
         SelectExprNode<N>: IfThenNode<N>,
@@ -244,10 +241,7 @@ where
     N: Num + Send + Sync + 'static + SelectExprNodeImpl<Property = N>,
     SelectExprNode<N>: IfThenNode<N>,
 {
-    pub fn otherwise(
-        self,
-        if_false_expr: impl Into<Expr<N>>,
-    ) -> Expr<N> {
+    pub fn otherwise(self, if_false_expr: impl Into<Expr<N>>) -> Expr<N> {
         let node = <SelectExprNode<N> as IfThenNode<N>>::if_then(
             self.bool_expr,
             self.if_true_expr,
@@ -265,23 +259,89 @@ mod tests {
     use crate::test_utils::{Atk, Hp, IntDef, IntHp, MapContext};
 
     #[test]
-    fn test_logic() {
+    fn test_complex_comparison_operators() {
         let mut ctx = MapContext::default();
-        ctx.insert::<Atk>(SRC, 1500.0);
-        ctx.insert::<IntHp>(DST, 0);
-        ctx.insert::<IntDef>(DST, 0);
+        ctx.insert::<IntHp>(SRC, 100);
+        ctx.insert::<IntHp>(DST, 200);
 
-        let expr = Atk::get(SRC).gt(IntHp::get(DST).as_());
-        let is_greater = expr.eval(&ctx).unwrap();
-        assert_eq!(is_greater, 1500 > 0);
+        assert!(IntHp::get(SRC).lt(IntHp::get(DST)).eval(&ctx).unwrap());
+        assert!(IntHp::get(SRC).le(100).eval(&ctx).unwrap());
+        assert!(IntHp::get(DST).gt(IntHp::get(SRC)).eval(&ctx).unwrap());
+        assert!(IntHp::get(DST).ge(200).eval(&ctx).unwrap());
+        assert!(IntHp::get(SRC).ne(IntHp::get(DST)).eval(&ctx).unwrap());
+        assert!(IntHp::get(SRC).eq(100).eval(&ctx).unwrap());
+    }
 
-        let expr = IntHp::get(DST).lt(Atk::get(SRC).as_());
-        let is_lower = expr.eval(&ctx).unwrap();
-        assert_eq!(is_lower, 0 < 1500);
+    #[test]
+    fn test_nested_logic_expressions() {
+        let ctx = MapContext::default();
+        let t = BoolExpr::true_();
+        let f = BoolExpr::false_();
 
-        let expr = IntDef::get(DST).eq(IntHp::get(DST).as_());
-        let is_equal = expr.eval(&ctx).unwrap();
-        assert_eq!(is_equal, true);
+        // Testing: !(True & False) | False  => !False | False => True | False => True
+        let expr = (!(t.clone() & f.clone())) | f.clone();
+        assert_eq!(expr.eval(&ctx).unwrap(), true);
+
+        // Testing: (True ^ True) & True => False & True => False
+        let expr2 = (t.clone() ^ t.clone()) & t.clone();
+        assert_eq!(expr2.eval(&ctx).unwrap(), false);
+    }
+
+    #[test]
+    fn test_conditional_logic_nesting() {
+        let mut ctx = MapContext::default();
+        ctx.insert::<Atk>(SRC, 50.0);
+
+        // Complex scenario:
+        // If (Atk > 100) then 1.0
+        // else if (Atk > 40) then 2.0
+        // else 3.0
+        let nested_if = Atk::get(SRC)
+            .gt(100.0)
+            .then(1.0)
+            .otherwise(Atk::get(SRC).gt(40.0).then(2.0).otherwise(3.0));
+
+        assert_eq!(nested_if.eval(&ctx).unwrap(), 2.0);
+
+        // Update context to trigger the "else"
+        ctx.insert::<Atk>(SRC, 10.0);
+        assert_eq!(nested_if.eval(&ctx).unwrap(), 3.0);
+    }
+
+    #[test]
+    fn test_logic_with_attribute_lookup() {
+        let mut ctx = MapContext::default();
+        // Assuming your system supports boolean attributes in the context
+        // If not, we simulate it by comparing attributes
+        ctx.insert::<IntHp>(SRC, 0);
+        ctx.insert::<IntDef>(SRC, 10);
+
+        // is_dead = HP <= 0
+        let is_dead = IntHp::get(SRC).le(0);
+        // has_armor = DEF > 0
+        let has_armor = IntDef::get(SRC).gt(0);
+
+        // Can move if (!is_dead & has_armor)
+        let can_move = (!is_dead.clone()) & has_armor.clone();
+        assert_eq!(can_move.eval(&ctx).unwrap(), false);
+
+        // Revive
+        ctx.insert::<IntHp>(SRC, 50);
+        assert_eq!(can_move.eval(&ctx).unwrap(), true);
+    }
+
+    #[test]
+    fn test_boolean_casting_and_if_then_cross_types() {
+        let mut ctx = MapContext::default();
+        ctx.insert::<IntHp>(SRC, 100);
+
+        // Combine logic with numeric outputs
+        // result = (HP == 100) ? 50.0 : 0.0
+        let expr = IntHp::get(SRC).eq(100).if_then_else(50.0, 0.0);
+
+        let res = expr.eval(&ctx).unwrap();
+        // Check if it correctly returned a float 50.0
+        assert_eq!(res, 50.0);
     }
 
     #[test]

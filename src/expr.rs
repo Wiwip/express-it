@@ -1,7 +1,7 @@
 use crate::context::{Path, ReadContext, ScopeId};
-use crate::float::{FloatBinaryOp, FloatExprNode, FloatUnaryOp};
+use crate::float::{FloatBinaryOp, FloatExprNode, FloatTrinaryOp, FloatUnaryOp};
 use crate::frame::Assignment;
-use crate::integer::IntExprNode;
+use crate::integer::{IntExprNode, IntTrinaryOp};
 use crate::integer::{IntBinaryOp, IntUnaryOp};
 use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
 use crate::num_cast::{CastFrom, CastNumPrimitive};
@@ -65,29 +65,6 @@ where
             path: Path::from_name(scope, name),
             expr: Expr::new(self.inner.clone()),
         }
-    }
-}
-
-impl<N> Expr<N>
-where
-    N: Float + SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>> + Send + Sync + 'static,
-    Self: From<N>,
-{
-    pub fn powf(self, rhs: N) -> Self {
-        Expr::new(Arc::new(FloatExprNode::BinaryOp {
-            lhs_expr: self,
-            op: FloatBinaryOp::Pow,
-            rhs_expr: rhs.into(),
-        }))
-    }
-
-    pub fn unwrap_or(self, rhs: Expr<N>) -> Self {
-        let node = FloatExprNode::ErrorHandlingOp {
-            expr: self,
-            or_expr: rhs,
-        };
-
-        Expr::new(Arc::new(node))
     }
 }
 
@@ -357,6 +334,18 @@ macro_rules! impl_binary_std_ops {
                     }))
                 }
             }
+            impl std::ops::Rem for Expr<$t>
+            {
+                type Output = Self;
+
+                fn rem(self, rhs_expr: Self) -> Self::Output {
+                    Expr::new(std::sync::Arc::new($target::$node_variant {
+                        lhs_expr: self,
+                        op: $op_enum::Rem,
+                        rhs_expr,
+                    }))
+                }
+            }
         )*
     };
 }
@@ -389,6 +378,18 @@ macro_rules! impl_binary_ops {
                 pub fn max(self, rhs_expr: impl Into<Self>) -> Self {
                     self.binary_expr($op_enum_path::Max, rhs_expr.into())
                 }
+                
+                pub fn pow(self, rhs_expr: impl Into<Self>) -> Self {
+                    self.binary_expr($op_enum_path::Pow, rhs_expr.into())
+                }
+                
+                pub fn unwrap_or(self, rhs: Self) -> Self {
+                    let node = $node_enum_path::ErrorHandlingOp {
+                        expr: self,
+                        or_expr: rhs,
+                    };
+                    Expr::new(Arc::new(node))
+                }
             }
         )*
     };
@@ -396,3 +397,34 @@ macro_rules! impl_binary_ops {
 
 impl_binary_ops!(IntExprNode, BinaryOp, IntBinaryOp: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_binary_ops!(FloatExprNode, BinaryOp, FloatBinaryOp:  f32, f64);
+
+macro_rules! impl_trinary_ops {
+    (
+        $node_enum_path:ident,
+        $node_variant_name:ident,
+        $op_enum_path:ident:
+        $($t:ty),*
+    ) => {
+        $(
+            impl Expr<$t>
+            {
+                fn trinary_expr(self, op: $op_enum_path, min_expr: Self, max_expr: Self) -> Self {
+                    let node = $node_enum_path::$node_variant_name {
+                        value_expr: self,
+                        op,
+                        arg1_expr: min_expr,
+                        arg2_expr: max_expr,
+                    };
+                    Expr::new(Arc::new(node))
+                }
+
+                pub fn clamp(self, min_expr: impl Into<Self>, max_expr: impl Into<Self>) -> Self {
+                    self.trinary_expr($op_enum_path::Clamp, min_expr.into(), max_expr.into())
+                }
+            }
+        )*
+    };
+}
+
+impl_trinary_ops!(IntExprNode, TrinaryOp, IntTrinaryOp: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
+impl_trinary_ops!(FloatExprNode, TrinaryOp, FloatTrinaryOp:  f32, f64);
