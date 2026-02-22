@@ -311,7 +311,6 @@ mod tests {
     #[test]
     fn test_logic_with_attribute_lookup() {
         let mut ctx = MapContext::default();
-        // Assuming your system supports boolean attributes in the context
         // If not, we simulate it by comparing attributes
         ctx.insert::<IntHp>(SRC, 0);
         ctx.insert::<IntDef>(SRC, 10);

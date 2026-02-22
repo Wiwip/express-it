@@ -378,11 +378,11 @@ macro_rules! impl_binary_ops {
                 pub fn max(self, rhs_expr: impl Into<Self>) -> Self {
                     self.binary_expr($op_enum_path::Max, rhs_expr.into())
                 }
-                
+
                 pub fn pow(self, rhs_expr: impl Into<Self>) -> Self {
                     self.binary_expr($op_enum_path::Pow, rhs_expr.into())
                 }
-                
+
                 pub fn unwrap_or(self, rhs: Self) -> Self {
                     let node = $node_enum_path::ErrorHandlingOp {
                         expr: self,
