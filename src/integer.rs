@@ -107,18 +107,6 @@ impl<
         + 'static,
 > Expr<N>
 {
-    fn binary_expr(self, op: IntBinaryOp, rhs: Self) -> Self {
-        Expr::new(Arc::new(IntExprNode::BinaryOp {
-            lhs_expr: self,
-            op,
-            rhs_expr: rhs,
-        }))
-    }
-
-    pub fn pow(self, rhs: Self) -> Self {
-        self.binary_expr(IntBinaryOp::Pow, rhs)
-    }
-
     pub fn clamp(self, min: impl Into<Self>, max: impl Into<Self>) -> Self {
         Expr::new(Arc::new(IntExprNode::TrinaryOp {
             value_expr: self,
@@ -156,21 +144,6 @@ where
     }
 }
 
-/*impl<N> std::ops::Neg for Expr<N>
-where
-    N: PrimInt + CheckedNeg + Send + Sync + 'static,
-{
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Expr::new(Arc::new(IntExprNode::UnaryOp {
-            op: IntUnaryOp::Neg,
-            expr: self,
-        }))
-    }
-}*/
-
-
 #[macro_export]
 macro_rules! impl_std_binary_ops {
     (
@@ -198,20 +171,6 @@ macro_rules! impl_std_binary_ops {
         )*
     };
 }
-
-
-/*impl_std_binary_ops!(
-    IntExprNode,
-    BinaryOp,
-    IntBinaryOp,
-    [
-        Add => (add, Add),
-        Sub => (sub, Sub),
-        Mul => (mul, Mul),
-        Div => (div, Div),
-        Rem => (rem, Rem)
-    ]
-);*/
 
 #[derive(Debug, Clone, Copy)]
 pub enum IntUnaryOp {
