@@ -1,7 +1,8 @@
-use crate::context::ReadContext;
+use crate::context::{Path, ReadContext};
 use crate::expr::{Expr, ExprNode, ExpressionError, SelectExprNodeImpl};
 use num_traits::{AsPrimitive, Num};
 use std::any::type_name;
+use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
@@ -15,7 +16,7 @@ where
     NOut: SelectExprNodeImpl,
     //Nd: ExprNode<NIn>
 {
-    inner: Expr<NIn>,
+    cast_expr: Expr<NIn>,
     phantom: PhantomData<NOut>,
 }
 
@@ -24,9 +25,9 @@ where
     NOut: SelectExprNodeImpl + Copy + 'static,
     NIn: SelectExprNodeImpl + AsPrimitive<NOut> + Copy,
 {
-    pub fn new(inner: Expr<NIn>) -> Self {
+    pub fn new(expr: Expr<NIn>) -> Self {
         Self {
-            inner,
+            cast_expr: expr,
             phantom: Default::default(),
         }
     }
@@ -48,6 +49,10 @@ where
     NOut: SelectExprNodeImpl + Num + Send + Sync + Copy + 'static,
 {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<NOut, ExpressionError> {
-        Ok(self.inner.eval_dyn(ctx)?.as_())
+        Ok(self.cast_expr.eval_dyn(ctx)?.as_())
+    }
+
+    fn get_dependencies(&self, deps: &mut HashSet<Path>) {
+        self.cast_expr.inner.get_dependencies(deps);
     }
 }

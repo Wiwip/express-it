@@ -1,8 +1,9 @@
-use crate::context::ReadContext;
+use crate::context::{Path, ReadContext};
 use crate::expr::{
     Expr, ExprNode, ExpressionError, IfThenNode, SelectExprNode, SelectExprNodeImpl,
 };
 use num_traits::Num;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub trait CompareExpr: Sized {
@@ -177,6 +178,22 @@ impl ExprNode<bool> for BoolExprNode {
             }
         }
     }
+
+    fn get_dependencies(&self, deps: &mut HashSet<Path>) {
+        match self {
+            BoolExprNode::Lit(_) => {}
+            BoolExprNode::Boxed(value) => {
+                value.get_dependencies(deps);
+            }
+            BoolExprNode::UnaryOp { expr, .. } => {
+                expr.inner.get_dependencies(deps);
+            }
+            BoolExprNode::BinaryOp { lhs, rhs, .. } => {
+                lhs.inner.get_dependencies(deps);
+                rhs.inner.get_dependencies(deps);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -216,6 +233,11 @@ where
         let l = self.lhs.eval_dyn(ctx)?;
         let r = self.rhs.eval_dyn(ctx)?;
         Ok(self.op.compare(&l, &r))
+    }
+
+    fn get_dependencies(&self, deps: &mut HashSet<Path>) {
+        self.rhs.inner.get_dependencies(deps);
+        self.lhs.inner.get_dependencies(deps);
     }
 }
 

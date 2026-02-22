@@ -1,8 +1,8 @@
 use crate::context::{Path, ReadContext, ScopeId};
 use crate::float::{FloatBinaryOp, FloatExprNode, FloatTrinaryOp, FloatUnaryOp};
 use crate::frame::Assignment;
-use crate::integer::{IntExprNode, IntTrinaryOp};
 use crate::integer::{IntBinaryOp, IntUnaryOp};
+use crate::integer::{IntExprNode, IntTrinaryOp};
 use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
 use crate::num_cast::{CastFrom, CastNumPrimitive};
 use num_traits::{AsPrimitive, Float, Num};
@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 pub trait ExprNode<N>: Send + Sync {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError>;
+    fn get_dependencies(&self, deps: &mut std::collections::HashSet<Path>);
 }
 
 pub trait IfThenNode<N>: ExprNode<N> + Sized
@@ -263,7 +264,6 @@ impl_neg_ops!(FloatExprNode,UnaryOp, FloatUnaryOp,Neg: f32, f64);
 // Signed Integer types (i8, i32, i64, etc.)
 impl_neg_ops!(IntExprNode,UnaryOp, IntUnaryOp,Neg: i8, i16, i32, i64, i128, isize);
 
-
 impl<N> CompareExpr for Expr<N>
 where
     N: Num + SelectExprNodeImpl<Property = N> + PartialOrd + Copy + Send + Sync + 'static,
@@ -428,3 +428,21 @@ macro_rules! impl_trinary_ops {
 
 impl_trinary_ops!(IntExprNode, TrinaryOp, IntTrinaryOp: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_trinary_ops!(FloatExprNode, TrinaryOp, FloatTrinaryOp:  f32, f64);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::scopes::{DST, SRC};
+    use crate::test_utils::{Atk, Hp};
+    
+    #[test]
+    fn test_dependency_tracking() {
+        let expr = Atk::get(SRC) + Hp::get(DST);
+        let mut deps = std::collections::HashSet::new();
+        expr.inner.get_dependencies(&mut deps);
+
+        assert!(deps.contains(&Path::from_type::<Atk>(SRC)));
+        assert!(deps.contains(&Path::from_type::<Hp>(DST)));
+        assert_eq!(deps.len(), 2);
+    }
+}

@@ -3,6 +3,7 @@ use crate::expr::{Expr, ExprNode, ExpressionError, IfThenNode, SelectExprNodeImp
 use crate::logic::BoolExpr;
 use crate::num_cast::CastFrom;
 use num_traits::Float;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -25,7 +26,7 @@ pub enum FloatExprNode<N: SelectExprNodeImpl<Property = N>> {
         arg1_expr: Expr<N>,
         arg2_expr: Expr<N>,
     },
-    IfThenOp {
+    IfThenElseOp {
         bool_expr: BoolExpr,
         arg1_expr: Expr<N>,
         arg2_expr: Expr<N>,
@@ -86,7 +87,7 @@ where
                 let arg2 = arg2_expr.eval_dyn(ctx)?;
                 op.eval(value, arg1, arg2)
             }
-            FloatExprNode::IfThenOp {
+            FloatExprNode::IfThenElseOp {
                 bool_expr,
                 arg1_expr,
                 arg2_expr,
@@ -104,6 +105,50 @@ where
             },
         }
     }
+
+    fn get_dependencies(&self, deps: &mut HashSet<Path>) {
+        match self {
+            FloatExprNode::Lit(_) => {}
+            FloatExprNode::Attribute(path) => {
+                deps.insert(path.clone());
+            }
+            FloatExprNode::Cast(cast) => {
+                cast.get_dependencies(deps);
+            }
+            FloatExprNode::UnaryOp { expr, .. } => {
+                expr.inner.get_dependencies(deps);
+            }
+            FloatExprNode::BinaryOp {
+                lhs_expr, rhs_expr, ..
+            } => {
+                lhs_expr.inner.get_dependencies(deps);
+                rhs_expr.inner.get_dependencies(deps);
+            }
+            FloatExprNode::TrinaryOp {
+                value_expr,
+                arg1_expr,
+                arg2_expr,
+                ..
+            } => {
+                value_expr.inner.get_dependencies(deps);
+                arg1_expr.inner.get_dependencies(deps);
+                arg2_expr.inner.get_dependencies(deps);
+            }
+            FloatExprNode::IfThenElseOp {
+                bool_expr,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                bool_expr.inner.get_dependencies(deps);
+                arg1_expr.inner.get_dependencies(deps);
+                arg2_expr.inner.get_dependencies(deps);
+            }
+            FloatExprNode::ErrorHandlingOp { expr, or_expr } => {
+                expr.inner.get_dependencies(deps);
+                or_expr.inner.get_dependencies(deps);
+            }
+        }
+    }
 }
 
 impl<N> IfThenNode<N> for FloatExprNode<N>
@@ -111,7 +156,7 @@ where
     N: Float + SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>> + Send + Sync + 'static,
 {
     fn if_then(bool_expr: BoolExpr, t: Expr<N>, f: Expr<N>) -> Self {
-        FloatExprNode::IfThenOp {
+        FloatExprNode::IfThenElseOp {
             bool_expr,
             arg1_expr: t.into(),
             arg2_expr: f.into(),
@@ -225,6 +270,8 @@ pub struct FloatSelector<N: SelectExprNodeImpl> {
     pub op: BoolExpr,
     pub rhs: Expr<N>,
 }
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,9 +349,15 @@ mod tests {
 
         // Dynamic bounds using other expressions
         ctx.insert::<Atk>(DST, 20.0); // min
-        ctx.insert::<Hp>(DST, 30.0);  // max
+        ctx.insert::<Hp>(DST, 30.0); // max
         // clamp 50 between 20 and 30 -> 30
-        assert_eq!(Hp::get(SRC).clamp(Atk::get(DST), Hp::get(DST)).eval(&ctx).unwrap(), 30.0);
+        assert_eq!(
+            Hp::get(SRC)
+                .clamp(Atk::get(DST), Hp::get(DST))
+                .eval(&ctx)
+                .unwrap(),
+            30.0
+        );
     }
 
     #[test]

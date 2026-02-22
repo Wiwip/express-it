@@ -3,6 +3,7 @@ use crate::expr::{Expr, ExprNode, ExpressionError, IfThenNode, SelectExprNodeImp
 use crate::logic::BoolExpr;
 use crate::num_cast::CastFrom;
 use num_traits::{CheckedNeg, PrimInt};
+use std::collections::HashSet;
 
 pub enum IntExprNode<N: SelectExprNodeImpl> {
     Lit(N),
@@ -93,6 +94,50 @@ where
                 Ok(v) => Ok(v),
                 Err(_) => or_expr.eval_dyn(ctx),
             },
+        }
+    }
+
+    fn get_dependencies(&self, deps: &mut HashSet<Path>) {
+        match self {
+            IntExprNode::Lit(_) => {}
+            IntExprNode::Attribute(path) => {
+                deps.insert(path.clone());
+            }
+            IntExprNode::Cast(cast) => {
+                cast.get_dependencies(deps);
+            }
+            IntExprNode::UnaryOp { expr, .. } => {
+                expr.inner.get_dependencies(deps);
+            }
+            IntExprNode::BinaryOp {
+                lhs_expr, rhs_expr, ..
+            } => {
+                lhs_expr.inner.get_dependencies(deps);
+                rhs_expr.inner.get_dependencies(deps);
+            }
+            IntExprNode::TrinaryOp {
+                value_expr,
+                arg1_expr,
+                arg2_expr,
+                ..
+            } => {
+                value_expr.inner.get_dependencies(deps);
+                arg1_expr.inner.get_dependencies(deps);
+                arg2_expr.inner.get_dependencies(deps);
+            }
+            IntExprNode::IfThenElseOp {
+                bool_expr,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                bool_expr.inner.get_dependencies(deps);
+                arg1_expr.inner.get_dependencies(deps);
+                arg2_expr.inner.get_dependencies(deps);
+            }
+            IntExprNode::ErrorHandlingOp { expr, or_expr } => {
+                expr.inner.get_dependencies(deps);
+                or_expr.inner.get_dependencies(deps);
+            }
         }
     }
 }
@@ -206,10 +251,10 @@ impl IntTrinaryOp {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Neg;
-    use crate::test_utils::{IntAtk, IntDef, IntHp, MapContext};
-    use crate::test_utils::scopes::{DST, ERROR_SCOPE, SRC};
     use super::*;
+    use crate::test_utils::scopes::{DST, ERROR_SCOPE, SRC};
+    use crate::test_utils::{IntAtk, IntDef, IntHp, MapContext};
+    use std::ops::Neg;
 
     #[test]
     fn test_unary_ops() {
