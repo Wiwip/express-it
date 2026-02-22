@@ -1,100 +1,54 @@
 use crate::context::{Path, ReadContext};
-use crate::expr::{Expr, ExprNode, ExpressionError, IfThenNode};
-use crate::impl_float_binary_ops;
-use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
+use crate::expr::{Expr, ExprNode, ExpressionError, IfThenNode, SelectExprNodeImpl};
+use crate::logic::{BoolExpr};
 use crate::num_cast::CastFrom;
 use num_traits::Float;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub type FloatExpr<N> = Expr<N, FloatExprNode<N>>;
-
-impl<N> CompareExpr for FloatExpr<N>
-where
-    N: Float + Send + Sync + 'static,
-{
-    fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr {
-        let cmp = Compare {
-            lhs: self,
-            op,
-            rhs: rhs.into(),
-        };
-        BoolExpr::new(Arc::new(BoolExprNode::Boxed(Box::new(cmp))))
-    }
-}
-
-pub enum FloatExprNode<N> {
+pub enum FloatExprNode<N: SelectExprNodeImpl<Property = N>> {
     Lit(N),
     Attribute(Path),
     Cast(Box<dyn ExprNode<N>>),
     UnaryOp {
         op: FloatUnaryOp,
-        expr: FloatExpr<N>,
+        expr: Expr<N>,
     },
     BinaryOp {
-        lhs_expr: FloatExpr<N>,
+        lhs_expr: Expr<N>,
         op: FloatBinaryOp,
-        rhs_expr: FloatExpr<N>,
+        rhs_expr: Expr<N>,
     },
     TrinaryOp {
-        value_expr: FloatExpr<N>,
+        value_expr: Expr<N>,
         op: FloatTrinaryOp,
-        arg1_expr: FloatExpr<N>,
-        arg2_expr: FloatExpr<N>,
+        arg1_expr: Expr<N>,
+        arg2_expr: Expr<N>,
     },
     IfThenOp {
         bool_expr: BoolExpr,
-        arg1_expr: FloatExpr<N>,
-        arg2_expr: FloatExpr<N>,
+        arg1_expr: Expr<N>,
+        arg2_expr: Expr<N>,
     },
     ErrorHandlingOp {
-        expr: FloatExpr<N>,
-        or_expr: FloatExpr<N>,
-    }
+        expr: Expr<N>,
+        or_expr: Expr<N>,
+    },
 }
 
-macro_rules! float_unary {
-    ($($name:ident => $op:ident),* $(,)?) => {
-        $(
-            pub fn $name(self) -> Self {
-                self.unary_expr(FloatUnaryOp::$op)
-            }
-        )*
-    };
-}
-
-impl<N: Float + Send + Sync + 'static> Expr<N, FloatExprNode<N>> {
-    fn unary_expr(self, op: FloatUnaryOp) -> Self {
-        Expr::new(Arc::new(FloatExprNode::UnaryOp { op, expr: self }))
-    }
-
-    float_unary! {
-        neg => Neg,
-        abs => Abs,
-        acos => Acos,
-        asin => Asin,
-        cos => Cos,
-        sin => Sin,
-        tan => Tan,
-        atan => Atan,
-        floor => Floor,
-        ceil => Ceil,
-        exp => Exp,
-        ln => Ln,
-        log10 => Log10,
-        log2 => Log2,
-        sqrt => Sqrt,
-        cbrt => Cbrt,
-    }
-}
-
-impl<N: Float + Send + Sync + 'static> Into<Expr<N, FloatExprNode<N>>> for FloatExprNode<N> {
-    fn into(self) -> Expr<N, FloatExprNode<N>> {
+impl<N> Into<Expr<N>> for FloatExprNode<N>
+where
+    N: Float + SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>> + Send + Sync + 'static,
+{
+    fn into(self) -> Expr<N> {
         Expr::new(Arc::new(self))
     }
 }
 
-impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
+impl<N> ExprNode<N> for FloatExprNode<N>
+where
+    N: Float + SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>> + Send + Sync + 'static,
+{
     fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
         match self {
             FloatExprNode::Lit(lit) => Ok(*lit),
@@ -144,21 +98,19 @@ impl<N: Float + Send + Sync + 'static> ExprNode<N> for FloatExprNode<N> {
                     arg2_expr.eval_dyn(ctx)
                 }
             }
-            FloatExprNode::ErrorHandlingOp { expr, or_expr } => {
-                match expr.eval_dyn(ctx) {
-                    Ok(v) => Ok(v),
-                    Err(_) => or_expr.eval_dyn(ctx),
-                }
-            }
+            FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.eval_dyn(ctx) {
+                Ok(v) => Ok(v),
+                Err(_) => or_expr.eval_dyn(ctx),
+            },
         }
     }
 }
 
 impl<N> IfThenNode<N> for FloatExprNode<N>
 where
-    N: Float + Send + Sync + 'static,
+    N: Float + SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>> + Send + Sync + 'static,
 {
-    fn if_then(bool_expr: BoolExpr, t: Expr<N, Self>, f: Expr<N, Self>) -> Self {
+    fn if_then(bool_expr: BoolExpr, t: Expr<N>, f: Expr<N>) -> Self {
         FloatExprNode::IfThenOp {
             bool_expr,
             arg1_expr: t.into(),
@@ -167,24 +119,41 @@ where
     }
 }
 
-impl<N> CastFrom<N> for FloatExprNode<N> {
+impl<N> CastFrom<N> for FloatExprNode<N>
+where
+    N: SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>>,
+{
     fn cast_from(node: Box<dyn ExprNode<N>>) -> Self {
         FloatExprNode::Cast(node)
     }
 }
 
-impl<N> std::ops::Neg for FloatExpr<N>
-where
-    N: Float + Send + Sync + 'static,
-{
-    type Output = Self;
+/*#[macro_export]
+macro_rules! impl_float_binary_ops {
+    (
+        $target:ident,
+        $node_variant:ident,
+        $op_enum:ident,
+        [$($trait:ident => ($method:ident, $variant:ident)),* $(,)?]
+    ) => {
+        $(
+            impl<N> std::ops::$trait for crate::expr::Expr<N>
+            where
+                N: Float + SelectExprNodeImpl<Property = N, Node = crate::float::FloatExprNode<N>>  + Send + Sync,
+                $target<N>: crate::expr::ExprNode<N>,
+            {
+                type Output = Self;
 
-    fn neg(self) -> Self::Output {
-        Expr::new(Arc::new(FloatExprNode::UnaryOp {
-            op: FloatUnaryOp::Neg,
-            expr: self,
-        }))
-    }
+                fn $method(self, rhs_expr: Self) -> Self::Output {
+                    Expr::new(std::sync::Arc::new($target::$node_variant {
+                        lhs_expr: self,
+                        op: $op_enum::$variant,
+                        rhs_expr,
+                    }))
+                }
+            }
+        )*
+    };
 }
 
 impl_float_binary_ops!(
@@ -198,7 +167,7 @@ impl_float_binary_ops!(
         Div => (div, Div),
         Rem => (rem, Rem)
     ]
-);
+);*/
 
 #[derive(Debug, Clone, Copy)]
 pub enum FloatConditionOp {
@@ -292,28 +261,27 @@ impl FloatTrinaryOp {
     }
 }
 
-pub struct FloatSelector<N, Nd> {
-    pub lhs: Expr<N, Nd>,
+pub struct FloatSelector<N: SelectExprNodeImpl> {
+    pub lhs: Expr<N>,
     pub op: BoolExpr,
-    pub rhs: Expr<N, Nd>,
+    pub rhs: Expr<N>,
 }
-
-impl<N, Nd> FloatSelector<N, Nd> {}
 
 #[cfg(test)]
 mod tests {
     use crate::expr::ExpressionError;
-    use crate::test_utils::scopes::{DST, SRC};
-    use crate::test_utils::{F32Attribute, I32Attribute, MapContext};
+    use crate::test_utils::scopes::{DST, ERROR_SCOPE, SRC};
+    use crate::test_utils::{Atk, Hp, MapContext};
     use num_traits::Float;
+    use std::ops::Neg;
 
     #[test]
     fn test_unary_ops() {
         let mut ctx = MapContext::default();
         // Destination
-        ctx.insert::<F32Attribute>(DST, 150.0);
+        ctx.insert::<Hp>(SRC, 150.0);
 
-        let expr = F32Attribute::dst().neg();
+        let expr = Hp::get(SRC).neg();
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, -150.0);
     }
@@ -322,24 +290,24 @@ mod tests {
     fn test_binary_ops() {
         let mut ctx = MapContext::default();
         // Destination
-        ctx.insert::<F32Attribute>(DST, 150.0);
+        ctx.insert::<Hp>(DST, 150.0);
 
         // Source
-        ctx.insert::<F32Attribute>(SRC, 50.0);
+        ctx.insert::<Atk>(SRC, 50.0);
 
-        let expr = F32Attribute::dst() - F32Attribute::src();
+        let expr = Hp::get(DST) - Atk::get(SRC);
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 150.0 - 50.0);
 
-        let expr = F32Attribute::dst() + F32Attribute::src();
+        let expr = Hp::get(DST) + Atk::get(SRC);
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 150.0 + 50.0);
 
-        let expr = F32Attribute::dst() * F32Attribute::src();
+        let expr = Hp::get(DST) * Atk::get(SRC);
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 150.0 * 50.0);
 
-        let expr = F32Attribute::dst() / F32Attribute::src();
+        let expr = Hp::get(DST) / Atk::get(SRC);
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 150.0 / 50.0);
     }
@@ -348,12 +316,12 @@ mod tests {
     fn test_trig_ops() {
         let mut ctx = MapContext::default();
         // Destination
-        ctx.insert::<F32Attribute>(DST, 150.0);
+        ctx.insert::<Hp>(DST, 150.0);
 
         // Source
-        ctx.insert::<F32Attribute>(SRC, 50.0);
+        ctx.insert::<Atk>(SRC, 50.0);
 
-        let expr = F32Attribute::dst().sin() + F32Attribute::src().cos();
+        let expr = Hp::get(DST).sin() + Atk::get(SRC).cos();
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 150.0.sin() + 50.0.cos());
     }
@@ -362,14 +330,14 @@ mod tests {
     fn test_cast_op() {
         let mut ctx = MapContext::default();
         // Source
-        ctx.insert::<I32Attribute>(SRC, 49);
-        ctx.insert::<F32Attribute>(SRC, 1500.0);
+        ctx.insert::<Hp>(DST, 49.0);
+        ctx.insert::<Atk>(SRC, 1500.0);
 
-        let expr = F32Attribute::src() + I32Attribute::src().as_();
+        let expr = Hp::get(DST) + Atk::get(SRC);
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 1500.0 + 49.0);
 
-        let expr = F32Attribute::src() - I32Attribute::src().as_();
+        let expr = Atk::get(SRC) - Hp::get(DST);
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 1500.0 - 49.0);
     }
@@ -378,14 +346,14 @@ mod tests {
     fn test_error_ops() {
         let mut ctx = MapContext::default();
         // Source
-        ctx.insert::<I32Attribute>(SRC, 0);
-        ctx.insert::<F32Attribute>(SRC, 1500.0);
+        ctx.insert::<Atk>(SRC, 0.0);
+        ctx.insert::<Atk>(DST, 1500.0);
 
-        let expr = F32Attribute::src() / I32Attribute::src().as_();
+        let expr = Atk::get(DST) / Atk::get(SRC); // Div by 0
         let expr_result = expr.eval(&ctx);
         assert_eq!(expr_result, Ok(f32::INFINITY));
 
-        let expr = F32Attribute::dst();
+        let expr = Atk::get(ERROR_SCOPE);
         let expr_result = expr.eval(&ctx);
         assert_eq!(expr_result, Err(ExpressionError::MissingAttribute));
     }

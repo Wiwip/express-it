@@ -1,17 +1,17 @@
 use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
 use crate::expr::{Expr, ExpressionError};
-use crate::float::{FloatExpr, FloatExprNode};
+use crate::float::FloatExprNode;
 use crate::frame::{Assignment, ExprAttribute};
-use crate::integer::{IntExpr, IntExprNode};
-use crate::test_utils::scopes::{DST, SRC};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::sync::Arc;
+use crate::integer::IntExprNode;
 
 pub mod scopes {
     use super::ScopeId;
     pub const SRC: ScopeId = ScopeId(0);
     pub const DST: ScopeId = ScopeId(1);
+    pub const ERROR_SCOPE: ScopeId = ScopeId(255);
 }
 
 #[derive(Default, Debug)]
@@ -60,79 +60,18 @@ impl WriteContext for MapContext {
     }
 }
 
-#[derive(Debug)]
-pub struct F32Attribute;
-
-impl F32Attribute {
-    pub fn src() -> FloatExpr<f32> {
-        let expr = FloatExprNode::Attribute(Path::from_type::<Self>(SRC));
-        Expr::new(Arc::new(expr))
-    }
-
-    pub fn dst() -> FloatExpr<f32> {
-        let expr = FloatExprNode::Attribute(Path::from_type::<Self>(DST));
-        Expr::new(Arc::new(expr))
-    }
-}
-
-impl ExprAttribute for F32Attribute {
-    type Property = f32;
-}
-
-#[derive(Debug)]
-pub struct I32Attribute;
-
-impl I32Attribute {
-    #[allow(unused)]
-    pub fn src() -> IntExpr<i32> {
-        let expr = IntExprNode::Attribute(Path::from_type::<Self>(SRC));
-        Expr::new(Arc::new(expr))
-    }
-
-    #[allow(unused)]
-    pub fn dst() -> IntExpr<i32> {
-        let expr = IntExprNode::Attribute(Path::from_type::<Self>(DST));
-        Expr::new(Arc::new(expr))
-    }
-}
-
-impl ExprAttribute for I32Attribute {
-    type Property = i32;
-}
-
-#[derive(Debug)]
-pub struct U32Attribute;
-
-impl U32Attribute {
-    #[allow(unused)]
-    pub fn src() -> IntExpr<u32> {
-        let expr = IntExprNode::Attribute(Path::from_type::<Self>(SRC));
-        Expr::new(Arc::new(expr))
-    }
-
-    #[allow(unused)]
-    pub fn dst() -> IntExpr<u32> {
-        let expr = IntExprNode::Attribute(Path::from_type::<Self>(DST));
-        Expr::new(Arc::new(expr))
-    }
-}
-
-impl ExprAttribute for U32Attribute {
-    type Property = u32;
-}
-
 pub struct Atk;
 
 impl Atk {
     #[allow(dead_code)]
     pub fn set(
         key: impl Into<ScopeId>,
-        expr: FloatExpr<f32>,
-    ) -> Assignment<f32, FloatExprNode<f32>> {
+        expr: Expr<f32>,
+    ) -> Assignment<f32> {
         let path = Path::from_type::<Self>(key.into());
         Assignment { path, expr }
     }
-    pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<f32> {
         let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
         Expr::new(Arc::new(expr))
     }
@@ -147,12 +86,12 @@ impl Def {
     #[allow(dead_code)]
     pub fn set(
         key: impl Into<ScopeId>,
-        expr: FloatExpr<f32>,
-    ) -> Assignment<f32, FloatExprNode<f32>> {
+        expr: Expr<f32>,
+    ) -> Assignment<f32> {
         let path = Path::from_type::<Self>(key.into());
         Assignment { path, expr }
     }
-    pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<f32> {
         let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
         Expr::new(Arc::new(expr))
     }
@@ -166,16 +105,76 @@ pub struct Hp;
 impl Hp {
     pub fn set(
         key: impl Into<ScopeId>,
-        expr: FloatExpr<f32>,
-    ) -> Assignment<f32, FloatExprNode<f32>> {
+        expr: Expr<f32>,
+    ) -> Assignment<f32> {
         let path = Path::from_type::<Self>(key.into());
         Assignment { path, expr }
     }
-    pub fn get(scope: impl Into<ScopeId>) -> FloatExpr<f32> {
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<f32> {
         let expr = FloatExprNode::Attribute(Path::from_type::<Self>(scope));
         Expr::new(Arc::new(expr))
     }
 }
 impl ExprAttribute for Hp {
     type Property = f32;
+}
+
+pub struct IntAtk;
+
+impl IntAtk {
+    #[allow(dead_code)]
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: Expr<u32>,
+    ) -> Assignment<u32> {
+        let path = Path::from_type::<Self>(key.into());
+        Assignment { path, expr }
+    }
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<u32> {
+        let expr = IntExprNode::Attribute(Path::from_type::<Self>(scope));
+        Expr::new(Arc::new(expr))
+    }
+}
+impl ExprAttribute for IntAtk {
+    type Property = u32;
+}
+
+pub struct IntDef;
+
+impl IntDef {
+    #[allow(dead_code)]
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: Expr<i32>,
+    ) -> Assignment<i32> {
+        let path = Path::from_type::<Self>(key.into());
+        Assignment { path, expr }
+    }
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<i32> {
+        let expr = IntExprNode::Attribute(Path::from_type::<Self>(scope));
+        Expr::new(Arc::new(expr))
+    }
+}
+impl ExprAttribute for IntDef {
+    type Property = i32;
+}
+
+pub struct IntHp;
+
+impl IntHp {
+    #[allow(dead_code)]
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: Expr<u32>,
+    ) -> Assignment<u32> {
+        let path = Path::from_type::<Self>(key.into());
+        Assignment { path, expr }
+    }
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<u32> {
+        let expr = IntExprNode::Attribute(Path::from_type::<Self>(scope));
+        Expr::new(Arc::new(expr))
+    }
+}
+impl ExprAttribute for IntHp {
+    type Property = u32;
 }

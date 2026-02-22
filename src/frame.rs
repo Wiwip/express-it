@@ -1,5 +1,5 @@
 use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
-use crate::expr::{Expr, ExprNode, ExpressionError};
+use crate::expr::{Expr, ExprNode, ExpressionError, SelectExprNodeImpl};
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -10,16 +10,16 @@ pub trait ExprAttribute {
     type Property: Debug;
 }
 
-pub struct Assignment<N, Nd: ExprNode<N>> {
+pub struct Assignment<N: SelectExprNodeImpl<Property = N>> {
     pub path: Path,
-    pub expr: Expr<N, Nd>,
+    pub expr: Expr<N>,
 }
 
 trait StepExecutor: Send + Sync {
     fn run(&self, read: &mut dyn Context);
 }
 
-impl<N: Send + Sync + 'static, Nd: ExprNode<N>> StepExecutor for Assignment<N, Nd> {
+impl<N: SelectExprNodeImpl<Property = N> + Send + Sync + 'static> StepExecutor for Assignment<N> {
     fn run(&self, ctx: &mut dyn Context) {
         let result = self.expr.inner.eval(ctx).unwrap_or_else(|_| {
             panic!(
@@ -77,7 +77,11 @@ impl<R: ReadContext> ReadContext for CachedEvalContext<'_, R> {
 }
 
 impl<W> WriteContext for CachedEvalContext<'_, W> {
-    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) -> Result<(), ExpressionError> {
+    fn write(
+        &mut self,
+        access: &dyn Accessor,
+        value: Box<dyn Any + Send + Sync>,
+    ) -> Result<(), ExpressionError> {
         self.shadow.insert(access.key(), value);
         Ok(())
     }
@@ -87,12 +91,12 @@ pub struct Step {
     exprs: Vec<Box<dyn StepExecutor>>,
 }
 
-impl<N, Nd> From<Assignment<N, Nd>> for Step
+impl<N> From<Assignment<N>> for Step
 where
-    N: Send + Sync + 'static,
-    Nd: ExprNode<N> + 'static,
+    N: SelectExprNodeImpl<Property = N> + Send + Sync + 'static,
+    //Nd: ExprNode<N> + 'static,
 {
-    fn from(value: Assignment<N, Nd>) -> Self {
+    fn from(value: Assignment<N>) -> Self {
         Step {
             exprs: vec![Box::new(value)],
         }
@@ -191,8 +195,8 @@ impl PlanResults {
 #[cfg(test)]
 mod tests {
     use crate::context::Path;
-    use crate::expr::ExprNode;
-    use crate::float::{FloatExpr, FloatExprNode};
+    use crate::expr::{Expr, ExprNode};
+    use crate::float::FloatExprNode;
     use crate::frame::LazyPlan;
     use crate::test_utils::scopes::{DST, SRC};
     use crate::test_utils::{Atk, Def, Hp, MapContext};
@@ -226,7 +230,7 @@ mod tests {
         ctx.insert::<Def>(DST, 2.0);
 
         let dmg_taken_expr = Atk::get(SRC) - Def::get(DST);
-        let get_dmg_taken: FloatExpr<f32> =
+        let get_dmg_taken: Expr<f32> =
             FloatExprNode::Attribute(Path::from_name(DST, "dmg_taken")).into();
 
         let lp = LazyPlan::new()

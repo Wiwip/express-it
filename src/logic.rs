@@ -28,7 +28,7 @@ pub trait CompareExpr: Sized {
     }
 }
 
-pub type BoolExpr = Expr<bool, BoolExprNode>;
+pub type BoolExpr = Expr<bool>;
 
 impl BoolExpr {
     pub fn true_() -> BoolExpr {
@@ -43,27 +43,27 @@ impl BoolExpr {
 
     pub fn if_then_else<N>(
         self,
-        if_true_expr: impl Into<Expr<N, SelectExprNode<N>>>,
-        if_false_expr: impl Into<Expr<N, SelectExprNode<N>>>,
-    ) -> Expr<N, SelectExprNode<N>>
+        if_true_expr: impl Into<Expr<N>>,
+        if_false_expr: impl Into<Expr<N>>,
+    ) -> Expr<N>
     where
         N: Num + SelectExprNodeImpl<Property = N> + Send + Sync + 'static,
         SelectExprNode<N>: IfThenNode<N>,
     {
         // Convert once (avoid move errors from multiple `.into()` calls)
         let bool_expr = self;
-        let t: Expr<N, SelectExprNode<N>> = if_true_expr.into();
-        let f: Expr<N, SelectExprNode<N>> = if_false_expr.into();
+        let t: Expr<N> = if_true_expr.into();
+        let f: Expr<N> = if_false_expr.into();
 
         // Build the correct node type (int or float) via the trait, not via FloatExprNode directly
         let node = <SelectExprNode<N> as IfThenNode<N>>::if_then(bool_expr, t, f);
 
-        Expr::<N, SelectExprNode<N>>::new(Arc::new(node))
+        Expr::<N>::new(Arc::new(node))
     }
 
     pub fn then<N>(
         self,
-        if_true_expr: impl Into<Expr<N, SelectExprNode<N>>>,
+        if_true_expr: impl Into<Expr<N>>,
     ) -> PartialConditional<N>
     where
         N: Num + SelectExprNodeImpl<Property = N> + Send + Sync + 'static,
@@ -205,16 +205,15 @@ impl ComparisonOp {
     }
 }
 
-pub struct Compare<N, Nd> {
-    pub lhs: Expr<N, Nd>,
+pub struct Compare<N: SelectExprNodeImpl> {
+    pub lhs: Expr<N>,
     pub op: ComparisonOp,
-    pub rhs: Expr<N, Nd>,
+    pub rhs: Expr<N>,
 }
 
-impl<N, Nd> ExprNode<bool> for Compare<N, Nd>
+impl<N> ExprNode<bool> for Compare<N>
 where
-    N: PartialOrd + Send + Sync + Copy + 'static,
-    Nd: ExprNode<N> + 'static,
+    N: SelectExprNodeImpl<Property = N> + PartialOrd + Send + Sync + Copy + 'static,
 {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
         let l = self.lhs.eval_dyn(ctx)?;
@@ -237,7 +236,7 @@ pub enum LogicBinaryOp {
 
 pub struct PartialConditional<N: SelectExprNodeImpl> {
     pub bool_expr: BoolExpr,
-    pub if_true_expr: Expr<N, SelectExprNode<N>>,
+    pub if_true_expr: Expr<N>,
 }
 
 impl<N> PartialConditional<N>
@@ -247,15 +246,15 @@ where
 {
     pub fn otherwise(
         self,
-        if_false_expr: impl Into<Expr<N, SelectExprNode<N>>>,
-    ) -> Expr<N, SelectExprNode<N>> {
+        if_false_expr: impl Into<Expr<N>>,
+    ) -> Expr<N> {
         let node = <SelectExprNode<N> as IfThenNode<N>>::if_then(
             self.bool_expr,
             self.if_true_expr,
             if_false_expr.into(),
         );
 
-        Expr::<N, SelectExprNode<N>>::new(Arc::new(node))
+        Expr::<N>::new(Arc::new(node))
     }
 }
 
@@ -263,48 +262,24 @@ where
 mod tests {
     use crate::logic::{BoolExpr, CompareExpr};
     use crate::test_utils::scopes::{DST, SRC};
-    use crate::test_utils::{Atk, F32Attribute, Hp, I32Attribute, MapContext};
+    use crate::test_utils::{Atk, Hp, IntDef, IntHp, MapContext};
 
     #[test]
-    fn test_float_logic() {
+    fn test_logic() {
         let mut ctx = MapContext::default();
-        ctx.insert::<F32Attribute>(SRC, 1500.0);
-        ctx.insert::<F32Attribute>(DST, 0.0);
-        ctx.insert::<I32Attribute>(DST, 0);
+        ctx.insert::<Atk>(SRC, 1500.0);
+        ctx.insert::<IntHp>(DST, 0);
+        ctx.insert::<IntDef>(DST, 0);
 
-        let expr = F32Attribute::src().gt(F32Attribute::dst());
+        let expr = Atk::get(SRC).gt(IntHp::get(DST).as_());
         let is_greater = expr.eval(&ctx).unwrap();
         assert_eq!(is_greater, 1500 > 0);
 
-        let expr = F32Attribute::dst().lt(F32Attribute::src());
+        let expr = IntHp::get(DST).lt(Atk::get(SRC).as_());
         let is_lower = expr.eval(&ctx).unwrap();
         assert_eq!(is_lower, 0 < 1500);
 
-        let expr = F32Attribute::dst().eq(I32Attribute::dst().as_());
-        let is_equal = expr.eval(&ctx).unwrap();
-        assert_eq!(is_equal, true);
-    }
-
-    #[test]
-    fn test_int_logic() {
-        let mut ctx = MapContext::default();
-        ctx.insert::<I32Attribute>(SRC, 1500);
-        ctx.insert::<I32Attribute>(DST, 0);
-        ctx.insert::<F32Attribute>(DST, 0.0);
-
-        let expr = I32Attribute::src().gt(I32Attribute::dst());
-        let is_greater = expr.eval(&ctx).unwrap();
-        assert_eq!(is_greater, 1500 > 0);
-
-        let expr = !I32Attribute::src().gt(I32Attribute::dst());
-        let is_greater = expr.eval(&ctx).unwrap();
-        assert_eq!(is_greater, !(1500 > 0));
-
-        let expr = I32Attribute::dst().lt(I32Attribute::src());
-        let is_lower = expr.eval(&ctx).unwrap();
-        assert_eq!(is_lower, 0 < 1500);
-
-        let expr = I32Attribute::dst().eq(F32Attribute::dst().as_());
+        let expr = IntDef::get(DST).eq(IntHp::get(DST).as_());
         let is_equal = expr.eval(&ctx).unwrap();
         assert_eq!(is_equal, true);
     }

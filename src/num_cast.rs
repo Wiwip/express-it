@@ -1,5 +1,5 @@
 use crate::context::ReadContext;
-use crate::expr::{Expr, ExprNode, ExpressionError};
+use crate::expr::{Expr, ExprNode, ExpressionError, SelectExprNodeImpl};
 use num_traits::{AsPrimitive, Num};
 use std::any::type_name;
 use std::fmt::{Debug, Formatter};
@@ -9,18 +9,22 @@ pub trait CastFrom<N>: Sized {
     fn cast_from(node: Box<dyn ExprNode<N>>) -> Self;
 }
 
-pub struct CastNumPrimitive<NOut, NIn, Nd: ExprNode<NIn>> {
-    inner: Expr<NIn, Nd>,
+pub struct CastNumPrimitive<NOut, NIn>
+where
+    NIn: SelectExprNodeImpl,
+    NOut: SelectExprNodeImpl,
+    //Nd: ExprNode<NIn>
+{
+    inner: Expr<NIn>,
     phantom: PhantomData<NOut>,
 }
 
-impl<NOut, NIn, Nd> CastNumPrimitive<NOut, NIn, Nd>
+impl<NOut, NIn> CastNumPrimitive<NOut, NIn>
 where
-    NOut: Copy + 'static,
-    NIn: AsPrimitive<NOut> + Copy,
-    Nd: ExprNode<NIn>,
+    NOut: SelectExprNodeImpl + Copy + 'static,
+    NIn: SelectExprNodeImpl + AsPrimitive<NOut> + Copy,
 {
-    pub fn new(inner: Expr<NIn, Nd>) -> Self {
+    pub fn new(inner: Expr<NIn>) -> Self {
         Self {
             inner,
             phantom: Default::default(),
@@ -28,20 +32,20 @@ where
     }
 }
 
-impl<NOut, NIn, Nd> Debug for CastNumPrimitive<NOut, NIn, Nd>
+impl<NOut, NIn> Debug for CastNumPrimitive<NOut, NIn>
 where
-    Nd: ExprNode<NIn>,
+    NIn: SelectExprNodeImpl,
+    NOut: SelectExprNodeImpl,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "AsFloat<{},{}>", type_name::<NOut>(), type_name::<NIn>())
     }
 }
 
-impl<NIn, NOut, Nd> ExprNode<NOut> for CastNumPrimitive<NOut, NIn, Nd>
+impl<NIn, NOut> ExprNode<NOut> for CastNumPrimitive<NOut, NIn>
 where
-    NIn: AsPrimitive<NOut> + Send + Sync + Copy,
-    NOut: Num + Send + Sync + Copy + 'static,
-    Nd: ExprNode<NIn> + 'static,
+    NIn: SelectExprNodeImpl<Property = NIn> + AsPrimitive<NOut> + Send + Sync + Copy,
+    NOut: SelectExprNodeImpl + Num + Send + Sync + Copy + 'static,
 {
     fn eval(&self, ctx: &dyn ReadContext) -> Result<NOut, ExpressionError> {
         Ok(self.inner.eval_dyn(ctx)?.as_())
