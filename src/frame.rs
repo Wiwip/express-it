@@ -3,6 +3,7 @@ use crate::expr::{Expr, ExprNode, ExpressionError, SelectExprNodeImpl};
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use num_traits::Num;
 
 trait Context: ReadContext + WriteContext {}
 
@@ -10,7 +11,7 @@ pub trait ExprAttribute {
     type Property: Debug;
 }
 
-pub struct Assignment<N: SelectExprNodeImpl<Property = N>> {
+pub struct Assignment<N: SelectExprNodeImpl> {
     pub path: Path,
     pub expr: Expr<N>,
 }
@@ -19,7 +20,7 @@ trait StepExecutor: Send + Sync {
     fn run(&self, read: &mut dyn Context);
 }
 
-impl<N: SelectExprNodeImpl<Property = N> + Send + Sync + 'static> StepExecutor for Assignment<N> {
+impl<N: SelectExprNodeImpl + Send + Sync + 'static> StepExecutor for Assignment<N> {
     fn run(&self, ctx: &mut dyn Context) {
         let result = self.expr.inner.eval(ctx).unwrap_or_else(|_| {
             panic!(
@@ -93,8 +94,7 @@ pub struct Step {
 
 impl<N> From<Assignment<N>> for Step
 where
-    N: SelectExprNodeImpl<Property = N> + Send + Sync + 'static,
-    //Nd: ExprNode<N> + 'static,
+    N: Num + SelectExprNodeImpl + Send + Sync + 'static,
 {
     fn from(value: Assignment<N>) -> Self {
         Step {
@@ -128,6 +128,7 @@ macro_rules! impl_step_from_tuple {
         };
     }
 
+impl_step_from_tuple!(T1);
 impl_step_from_tuple!(T1, T2);
 impl_step_from_tuple!(T1, T2, T3);
 impl_step_from_tuple!(T1, T2, T3, T4);

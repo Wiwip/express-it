@@ -23,6 +23,7 @@ where
     fn if_then(bool_expr: BoolExpr, t: Expr<N>, f: Expr<N>) -> Self;
 }
 
+
 pub struct Expr<N: SelectExprNodeImpl> {
     pub inner: Arc<SelectExprNode<N>>,
     phantom: std::marker::PhantomData<N>,
@@ -106,7 +107,7 @@ where
     }
 }
 
-impl<N: SelectExprNodeImpl<Property = N>> Clone for Expr<N> {
+impl<N: SelectExprNodeImpl> Clone for Expr<N> {
     fn clone(&self) -> Self {
         Expr::new(self.inner.clone())
     }
@@ -177,7 +178,7 @@ impl_into_expr!(FloatExprNode: f32, f64);
 impl_into_expr!(BoolExprNode: bool);
 
 pub trait SelectExprNodeImpl {
-    type Property;
+    type Property: Send + Sync;
     type Node: ExprNode<Self::Property>;
 }
 
