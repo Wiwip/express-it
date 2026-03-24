@@ -14,7 +14,6 @@ pub struct CastNumPrimitive<NOut, NIn>
 where
     NIn: SelectExprNodeImpl,
     NOut: SelectExprNodeImpl,
-    //Nd: ExprNode<NIn>
 {
     cast_expr: Expr<NIn>,
     phantom: PhantomData<NOut>,

@@ -271,7 +271,6 @@ pub struct FloatSelector<N: SelectExprNodeImpl> {
     pub rhs: Expr<N>,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -23,7 +23,6 @@ where
     fn if_then(bool_expr: BoolExpr, t: Expr<N>, f: Expr<N>) -> Self;
 }
 
-
 pub struct Expr<N: SelectExprNodeImpl> {
     pub inner: Arc<SelectExprNode<N>>,
     phantom: std::marker::PhantomData<N>,
@@ -434,16 +433,27 @@ impl_trinary_ops!(FloatExprNode, TrinaryOp, FloatTrinaryOp:  f32, f64);
 mod tests {
     use super::*;
     use crate::test_utils::scopes::{DST, SRC};
-    use crate::test_utils::{Atk, Hp};
-    
+    use crate::test_utils::{Atk, Hp, IntAtk, IntHp};
+
     #[test]
-    fn test_dependency_tracking() {
+    fn test_float_dependency_tracking() {
         let expr = Atk::get(SRC) + Hp::get(DST);
         let mut deps = std::collections::HashSet::new();
         expr.inner.get_dependencies(&mut deps);
 
-        assert!(deps.contains(&Path::from_type::<Atk>(SRC)));
-        assert!(deps.contains(&Path::from_type::<Hp>(DST)));
+        assert!(deps.contains(&Path::from_type_name::<Atk>(SRC)));
+        assert!(deps.contains(&Path::from_type_name::<Hp>(DST)));
+        assert_eq!(deps.len(), 2);
+    }
+
+    #[test]
+    fn test_integer_dependency_tracking() {
+        let expr = IntAtk::get(SRC) + IntHp::get(DST);
+        let mut deps = std::collections::HashSet::new();
+        expr.inner.get_dependencies(&mut deps);
+
+        assert!(deps.contains(&Path::from_type_name::<IntAtk>(SRC)));
+        assert!(deps.contains(&Path::from_type_name::<IntHp>(DST)));
         assert_eq!(deps.len(), 2);
     }
 }

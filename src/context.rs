@@ -17,7 +17,7 @@ impl Path {
         }
     }
 
-    pub fn from_type<T: 'static>(scope_id: impl Into<ScopeId>) -> Self {
+    pub fn from_type_name<T: 'static>(scope_id: impl Into<ScopeId>) -> Self {
         Self {
             scope: scope_id.into(),
             id: fnv1a64(type_name::<T>()),
@@ -51,12 +51,20 @@ impl Accessor for Path {
 }
 
 pub trait ReadContext {
-    fn get_any(& self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError>;
-    fn get_any_component(&self, path: ScopeId, type_id: TypeId) -> Result<&dyn Any, ExpressionError>;
+    fn get_any(&self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError>;
+    fn get_any_component(
+        &self,
+        path: ScopeId,
+        type_id: TypeId,
+    ) -> Result<&dyn Any, ExpressionError>;
 }
 
 pub trait WriteContext {
-    fn write(&mut self, access: &dyn Accessor, value: Box<dyn Any + Send + Sync>) -> Result<(), ExpressionError>;
+    fn write(
+        &mut self,
+        access: &dyn Accessor,
+        value: Box<dyn Any + Send + Sync>,
+    ) -> Result<(), ExpressionError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

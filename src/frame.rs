@@ -1,9 +1,9 @@
 use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
 use crate::expr::{Expr, ExprNode, ExpressionError, SelectExprNodeImpl};
+use num_traits::Num;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use num_traits::Num;
 
 trait Context: ReadContext + WriteContext {}
 
@@ -217,7 +217,7 @@ mod tests {
 
         lp.commit(&mut ctx);
 
-        let expr = FloatExprNode::Attribute(Path::from_type::<Hp>(DST));
+        let expr = FloatExprNode::Attribute(Path::from_type_name::<Hp>(DST));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }
@@ -244,7 +244,7 @@ mod tests {
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 8.0);
 
-        let expr = FloatExprNode::Attribute(Path::from_type::<Hp>(DST));
+        let expr = FloatExprNode::Attribute(Path::from_type_name::<Hp>(DST));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }
