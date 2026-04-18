@@ -4,6 +4,7 @@ use num_traits::Num;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use log::trace;
 
 trait Context: ReadContext + WriteContext {}
 
@@ -26,12 +27,14 @@ where
     Ctx: ReadContext + 'static,
 {
     fn run(&self, ctx: &mut dyn Context) {
+        trace!("Executing assignment for path: {:?}", self.path);
         let result = self.expr.inner.eval_dyn(ctx).unwrap_or_else(|_| {
             panic!(
                 "Executor failed. {} value could not be found in context.",
                 self.path
             )
         });
+        trace!("Assignment completed for path: {:?}", self.path);
         let _handle_error = ctx.write(&self.path, Box::new(result));
     }
 }
@@ -39,8 +42,8 @@ where
 /// A context with the purpose of intercepting read-write calls and provide temporary values
 /// Reads from the buffer first, and read from the real context if not present in the buffer.
 /// Writes-back to the world only when commit is called.
-pub struct CachedEvalContext<'a, R> {
-    read_ctx: &'a R,
+pub struct CachedEvalContext<'a, Ctx> {
+    read_ctx: &'a Ctx,
     shadow: HashMap<(ScopeId, u64), Box<dyn Any + Send + Sync>>,
 }
 
@@ -61,13 +64,15 @@ impl<'a, Ctx> CachedEvalContext<'a, Ctx> {
     }
 }
 
-impl<RW: ReadContext> Context for CachedEvalContext<'_, RW> {}
+impl<Ctx: ReadContext> Context for CachedEvalContext<'_, Ctx> {}
 
-impl<R: ReadContext> ReadContext for CachedEvalContext<'_, R> {
+impl<Ctx: ReadContext> ReadContext for CachedEvalContext<'_, Ctx> {
     fn get_any(&self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError> {
         if let Some(value) = self.shadow.get(&access.key()) {
+            trace!("Cache hit for path: {:?}", access.key());
             Ok(value.as_ref())
         } else {
+            trace!("Cache miss for path: {:?}, fetching from source", access.key());
             self.read_ctx.get_any(access)
         }
     }
@@ -86,6 +91,7 @@ impl<W> WriteContext for CachedEvalContext<'_, W> {
         access: &dyn Accessor,
         value: Box<dyn Any + Send + Sync>,
     ) -> Result<(), ExpressionError> {
+        trace!("Writing to shadow: {:?}", access.key());
         self.shadow.insert(access.key(), value);
         Ok(())
     }
@@ -109,7 +115,8 @@ where
 
 impl StepExecutor for Step {
     fn run(&self, ctx: &mut dyn Context) {
-        for expr in &self.exprs {
+        for (i, expr) in self.exprs.iter().enumerate() {
+            trace!("Running expr {}/{}", i + 1, self.exprs.len());
             expr.run(ctx);
         }
     }
@@ -157,17 +164,21 @@ impl LazyPlan {
 
     /// Phase 1: evaluate using only a read context, producing an owned output buffer.
     pub fn eval<R: ReadContext>(&self, read: &R) -> PlanResults {
+        trace!("Starting plan evaluation");
         let mut shadow_eval = CachedEvalContext::new(read);
 
-        for step in &self.plan {
+        for (i, step) in self.plan.iter().enumerate() {
+            trace!("Executing plan step {}/{}", i + 1, self.plan.len());
             step.run(&mut shadow_eval);
         }
 
+        trace!("Plan evaluation complete");
         shadow_eval.into_output()
     }
 
     /// Phase 2: flush buffered writes into a write context.
     pub fn flush<W: WriteContext>(&self, output: PlanResults, write: &mut W) {
+        trace!("Flushing plan results");
         output.flush_into(write);
     }
 
@@ -175,6 +186,7 @@ impl LazyPlan {
     pub fn commit<Ctx: ReadContext + WriteContext>(&self, ctx: &mut Ctx) {
         let output = self.eval(ctx);
         self.flush(output, ctx);
+        trace!("Plan committed to context");
     }
 }
 
@@ -192,6 +204,7 @@ impl PlanResults {
                 scope: key.0,
                 id: key.1,
             };
+            trace!("Flushing result for path: {:?}", path);
             let _ = write.write(&path, value);
         }
     }
