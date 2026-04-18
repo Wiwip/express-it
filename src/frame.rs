@@ -3,14 +3,9 @@ use crate::expr::{Expr, ExprNode, ExpressionError, SelectExprNodeImpl};
 use num_traits::Num;
 use std::any::Any;
 use std::collections::HashMap;
-use std::fmt::Debug;
 use log::trace;
 
 trait Context: ReadContext + WriteContext {}
-
-pub trait ExprAttribute {
-    type Property: Debug;
-}
 
 pub struct Assignment<N: SelectExprNodeImpl<Ctx>, Ctx> {
     pub path: Path,
@@ -18,7 +13,7 @@ pub struct Assignment<N: SelectExprNodeImpl<Ctx>, Ctx> {
 }
 
 trait StepExecutor: Send + Sync + 'static {
-    fn run(&self, read: &mut dyn Context);
+    fn run(&self, read: &mut dyn Context) -> Result<(), ExpressionError>;
 }
 
 impl<N, Ctx> StepExecutor for Assignment<N, Ctx>
@@ -26,16 +21,12 @@ where
     N: SelectExprNodeImpl<Ctx> + Send + Sync + 'static,
     Ctx: ReadContext + 'static,
 {
-    fn run(&self, ctx: &mut dyn Context) {
+    fn run(&self, ctx: &mut dyn Context) -> Result<(), ExpressionError> {
         trace!("Executing assignment for path: {:?}", self.path);
-        let result = self.expr.inner.eval_dyn(ctx).unwrap_or_else(|_| {
-            panic!(
-                "Executor failed. {} value could not be found in context.",
-                self.path
-            )
-        });
+        let result = self.expr.inner.eval_dyn(ctx)?;
         trace!("Assignment completed for path: {:?}", self.path);
         let _handle_error = ctx.write(&self.path, Box::new(result));
+        Ok(())
     }
 }
 
@@ -114,11 +105,12 @@ where
 }
 
 impl StepExecutor for Step {
-    fn run(&self, ctx: &mut dyn Context) {
+    fn run(&self, ctx: &mut dyn Context) -> Result<(), ExpressionError> {
         for (i, expr) in self.exprs.iter().enumerate() {
             trace!("Running expr {}/{}", i + 1, self.exprs.len());
-            expr.run(ctx);
+            expr.run(ctx)?;
         }
+        Ok(())
     }
 }
 
@@ -163,17 +155,17 @@ impl LazyPlan {
     }
 
     /// Phase 1: evaluate using only a read context, producing an owned output buffer.
-    pub fn eval<R: ReadContext>(&self, read: &R) -> PlanResults {
+    pub fn eval<R: ReadContext>(&self, read: &R) -> Result<PlanResults, ExpressionError> {
         trace!("Starting plan evaluation");
         let mut shadow_eval = CachedEvalContext::new(read);
 
         for (i, step) in self.plan.iter().enumerate() {
             trace!("Executing plan step {}/{}", i + 1, self.plan.len());
-            step.run(&mut shadow_eval);
+            step.run(&mut shadow_eval)?;
         }
 
         trace!("Plan evaluation complete");
-        shadow_eval.into_output()
+        Ok(shadow_eval.into_output())
     }
 
     /// Phase 2: flush buffered writes into a write context.
@@ -183,10 +175,11 @@ impl LazyPlan {
     }
 
     /// Commit the expression plan
-    pub fn commit<Ctx: ReadContext + WriteContext>(&self, ctx: &mut Ctx) {
-        let output = self.eval(ctx);
+    pub fn commit<Ctx: ReadContext + WriteContext>(&self, ctx: &mut Ctx) -> Result<(), ExpressionError> {
+        let output = self.eval(ctx)?;
         self.flush(output, ctx);
         trace!("Plan committed to context");
+        Ok(())
     }
 }
 
@@ -241,7 +234,7 @@ mod tests {
 
         let lp = LazyPlan::new().step(Hp::set(DST, new_hp_expr));
 
-        lp.commit(&mut ctx);
+        lp.commit(&mut ctx).expect("Failed to commit");
 
         let expr =  FloatExprNode::<f32, MapContext>::Attribute(Path::from_type_name::<Hp>(DST));
         let expr_result = expr.eval(&ctx).unwrap();
@@ -265,7 +258,7 @@ mod tests {
             .step(dmg_taken_expr.max(0.0).alias(DST, "dmg_taken"))
             .step(Hp::set(DST, Hp::get(DST) - get_dmg_taken));
 
-        lp.commit(&mut ctx);
+        lp.commit(&mut ctx).expect("Failed to commit");
 
         let expr = FloatExprNode::<f32, MapContext>::Attribute(Path::from_name(DST, "dmg_taken"));
         let expr_result: f32 = expr.eval(&ctx).unwrap();

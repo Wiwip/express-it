@@ -1,10 +1,11 @@
 use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
 use crate::expr::{Expr, ExpressionError};
 use crate::float::FloatExprNode;
-use crate::frame::{Assignment, ExprAttribute};
+use crate::frame::Assignment;
 use crate::integer::IntExprNode;
 use std::any::Any;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 pub mod scopes {
@@ -12,6 +13,10 @@ pub mod scopes {
     pub const SRC: ScopeId = ScopeId(0);
     pub const DST: ScopeId = ScopeId(1);
     pub const ERROR_SCOPE: ScopeId = ScopeId(255);
+}
+
+pub trait ExprAttribute {
+    type Property: Debug;
 }
 
 #[derive(Default, Debug)]
