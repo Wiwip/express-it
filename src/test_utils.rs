@@ -1,5 +1,5 @@
 use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
-use crate::expr::{Expr, ExpressionError};
+use crate::expr::{Expr, ExprSchema, ExpressionError};
 use crate::float::FloatExprNode;
 use crate::frame::Assignment;
 use crate::integer::IntExprNode;
@@ -17,6 +17,13 @@ pub mod scopes {
 
 pub trait ExprAttribute {
     type Property: Debug;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MapSchema;
+
+impl ExprSchema for MapSchema {
+    type Context<'w, 's> = MapContext;
 }
 
 #[derive(Default, Debug)]
@@ -67,12 +74,12 @@ impl Atk {
     #[allow(dead_code)]
     pub fn set(
         key: impl Into<ScopeId>,
-        expr: Expr<f32, MapContext>,
-    ) -> Assignment<f32, MapContext> {
+        expr: Expr<f32, MapSchema>,
+    ) -> Assignment<f32, MapSchema> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
-    pub fn get(scope: impl Into<ScopeId>) -> Expr<f32, MapContext> {
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<f32, MapSchema> {
         let expr = FloatExprNode::Attribute(Path::from_type_name::<Self>(scope));
         Expr::new(Arc::new(expr))
     }
@@ -85,14 +92,11 @@ pub struct Def;
 
 impl Def {
     #[allow(dead_code)]
-    pub fn set(
-        key: impl Into<ScopeId>,
-        expr: Expr<f32, MapContext>,
-    ) -> Assignment<f32, MapContext> {
+    pub fn set(key: impl Into<ScopeId>, expr: Expr<f32, MapSchema>) -> Assignment<f32, MapSchema> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
-    pub fn get(scope: impl Into<ScopeId>) -> Expr<f32, MapContext> {
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<f32, MapSchema> {
         let expr = FloatExprNode::Attribute(Path::from_type_name::<Self>(scope));
         Expr::new(Arc::new(expr))
     }
@@ -104,14 +108,11 @@ impl ExprAttribute for Def {
 pub struct Hp;
 
 impl Hp {
-    pub fn set(
-        key: impl Into<ScopeId>,
-        expr: Expr<f32, MapContext>,
-    ) -> Assignment<f32, MapContext> {
+    pub fn set(key: impl Into<ScopeId>, expr: Expr<f32, MapSchema>) -> Assignment<f32, MapSchema> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
-    pub fn get(scope: impl Into<ScopeId>) -> Expr<f32, MapContext> {
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<f32, MapSchema> {
         let expr = FloatExprNode::Attribute(Path::from_type_name::<Self>(scope));
         Expr::new(Arc::new(expr))
     }
@@ -124,14 +125,11 @@ pub struct IntAtk;
 
 impl IntAtk {
     #[allow(dead_code)]
-    pub fn set(
-        key: impl Into<ScopeId>,
-        expr: Expr<u32, MapContext>,
-    ) -> Assignment<u32, MapContext> {
+    pub fn set(key: impl Into<ScopeId>, expr: Expr<u32, MapSchema>) -> Assignment<u32, MapSchema> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
-    pub fn get(scope: impl Into<ScopeId>) -> Expr<u32, MapContext> {
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<u32, MapSchema> {
         let expr = IntExprNode::Attribute(Path::from_type_name::<Self>(scope));
         Expr::new(Arc::new(expr))
     }
@@ -144,14 +142,11 @@ pub struct IntDef;
 
 impl IntDef {
     #[allow(dead_code)]
-    pub fn set(
-        key: impl Into<ScopeId>,
-        expr: Expr<i32, MapContext>,
-    ) -> Assignment<i32, MapContext> {
+    pub fn set(key: impl Into<ScopeId>, expr: Expr<i32, MapSchema>) -> Assignment<i32, MapSchema> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
-    pub fn get(scope: impl Into<ScopeId>) -> Expr<i32, MapContext> {
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<i32, MapSchema> {
         let expr = IntExprNode::Attribute(Path::from_type_name::<Self>(scope));
         Expr::new(Arc::new(expr))
     }
@@ -164,14 +159,11 @@ pub struct IntHp;
 
 impl IntHp {
     #[allow(dead_code)]
-    pub fn set(
-        key: impl Into<ScopeId>,
-        expr: Expr<u32, MapContext>,
-    ) -> Assignment<u32, MapContext> {
+    pub fn set(key: impl Into<ScopeId>, expr: Expr<u32, MapSchema>) -> Assignment<u32, MapSchema> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
-    pub fn get(scope: impl Into<ScopeId>) -> Expr<u32, MapContext> {
+    pub fn get(scope: impl Into<ScopeId>) -> Expr<u32, MapSchema> {
         let expr = IntExprNode::Attribute(Path::from_type_name::<Self>(scope));
         Expr::new(Arc::new(expr))
     }

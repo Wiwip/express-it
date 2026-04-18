@@ -1,25 +1,25 @@
 use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
-use crate::expr::{Expr, ExprNode, ExpressionError, SelectExprNodeImpl};
+use crate::expr::{Expr, ExprNode, ExprSchema, ExpressionError, SelectExprNodeImpl};
+use log::trace;
 use num_traits::Num;
 use std::any::Any;
 use std::collections::HashMap;
-use log::trace;
 
 trait Context: ReadContext + WriteContext {}
 
-pub struct Assignment<N: SelectExprNodeImpl<Ctx>, Ctx> {
+pub struct Assignment<N: SelectExprNodeImpl<S>, S: ExprSchema> {
     pub path: Path,
-    pub expr: Expr<N, Ctx>,
+    pub expr: Expr<N, S>,
 }
 
 trait StepExecutor: Send + Sync + 'static {
     fn run(&self, read: &mut dyn Context) -> Result<(), ExpressionError>;
 }
 
-impl<N, Ctx> StepExecutor for Assignment<N, Ctx>
+impl<N, S> StepExecutor for Assignment<N, S>
 where
-    N: SelectExprNodeImpl<Ctx> + Send + Sync + 'static,
-    Ctx: ReadContext + 'static,
+    N: SelectExprNodeImpl<S> + Send + Sync + 'static,
+    S: ExprSchema,
 {
     fn run(&self, ctx: &mut dyn Context) -> Result<(), ExpressionError> {
         trace!("Executing assignment for path: {:?}", self.path);
@@ -63,15 +63,15 @@ impl<Ctx: ReadContext> ReadContext for CachedEvalContext<'_, Ctx> {
             trace!("Cache hit for path: {:?}", access.key());
             Ok(value.as_ref())
         } else {
-            trace!("Cache miss for path: {:?}, fetching from source", access.key());
+            trace!(
+                "Cache miss for path: {:?}, fetching from source",
+                access.key()
+            );
             self.read_ctx.get_any(access)
         }
     }
 
-    fn get_any_component(
-        &self,
-        _path: &Path,
-    ) -> Result<&dyn Any, ExpressionError> {
+    fn get_any_component(&self, _path: &Path) -> Result<&dyn Any, ExpressionError> {
         unreachable!()
     }
 }
@@ -92,12 +92,12 @@ pub struct Step {
     exprs: Vec<Box<dyn StepExecutor>>,
 }
 
-impl<N, Ctx> From<Assignment<N, Ctx>> for Step
+impl<N, S> From<Assignment<N, S>> for Step
 where
-    N: Num + SelectExprNodeImpl<Ctx> + Send + Sync + 'static,
-    Ctx: ReadContext + 'static,
+    N: Num + SelectExprNodeImpl<S> + Send + Sync + 'static,
+    S: ExprSchema,
 {
-    fn from(value: Assignment<N, Ctx>) -> Self {
+    fn from(value: Assignment<N, S>) -> Self {
         Step {
             exprs: vec![Box::new(value)],
         }
@@ -175,7 +175,10 @@ impl LazyPlan {
     }
 
     /// Commit the expression plan
-    pub fn commit<Ctx: ReadContext + WriteContext>(&self, ctx: &mut Ctx) -> Result<(), ExpressionError> {
+    pub fn commit<Ctx: ReadContext + WriteContext>(
+        &self,
+        ctx: &mut Ctx,
+    ) -> Result<(), ExpressionError> {
         let output = self.eval(ctx)?;
         self.flush(output, ctx);
         trace!("Plan committed to context");
@@ -210,9 +213,9 @@ mod tests {
     use crate::float::FloatExprNode;
     use crate::frame::LazyPlan;
     use crate::test_utils::scopes::{DST, SRC};
-    use crate::test_utils::{Atk, Def, Hp, MapContext};
+    use crate::test_utils::{Atk, Def, Hp, MapContext, MapSchema};
 
-    fn init(){
+    fn init() {
         let _ = env_logger::builder()
             .filter_level(log::LevelFilter::Trace) // Allow everything up to Trace
             .is_test(true)
@@ -236,7 +239,7 @@ mod tests {
 
         lp.commit(&mut ctx).expect("Failed to commit");
 
-        let expr =  FloatExprNode::<f32, MapContext>::Attribute(Path::from_type_name::<Hp>(DST));
+        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST));
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }
@@ -252,7 +255,8 @@ mod tests {
         ctx.insert::<Def>(DST, 2.0);
 
         let dmg_taken_expr = Atk::get(SRC) - Def::get(DST);
-        let get_dmg_taken: Expr<f32, MapContext> = FloatExprNode::<f32, MapContext>::Attribute(Path::from_name(DST, "dmg_taken")).into();
+        let get_dmg_taken: Expr<f32, MapSchema> =
+            FloatExprNode::Attribute(Path::from_name(DST, "dmg_taken")).into();
 
         let lp = LazyPlan::new()
             .step(dmg_taken_expr.max(0.0).alias(DST, "dmg_taken"))
@@ -260,11 +264,11 @@ mod tests {
 
         lp.commit(&mut ctx).expect("Failed to commit");
 
-        let expr = FloatExprNode::<f32, MapContext>::Attribute(Path::from_name(DST, "dmg_taken"));
+        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_name(DST, "dmg_taken"));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 8.0);
 
-        let expr = FloatExprNode::<f32, MapContext>::Attribute(Path::from_type_name::<Hp>(DST));
+        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }

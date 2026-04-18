@@ -1,32 +1,32 @@
 use crate::context::{Path, ReadContext};
-use crate::expr::{Expr, ExprNode, ExpressionError, SelectExprNodeImpl};
+use crate::expr::{Expr, ExprNode, ExprSchema, ExpressionError, SelectExprNodeImpl};
 use num_traits::{AsPrimitive, Num};
 use std::any::type_name;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
-pub trait CastFrom<N, Ctx>: Sized {
-    fn cast_from(node: Box<dyn ExprNode<N, Ctx>>) -> Self;
+pub trait CastFrom<N, S>: Sized {
+    fn cast_from(node: Box<dyn ExprNode<N, S>>) -> Self;
 }
 
-pub struct CastNumPrimitive<NOut, NIn, Ctx>
+pub struct CastNumPrimitive<NOut, NIn, S>
 where
-    NIn: SelectExprNodeImpl<Ctx>,
-    NOut: SelectExprNodeImpl<Ctx>,
-    Ctx: ReadContext,
+    NIn: SelectExprNodeImpl<S>,
+    NOut: SelectExprNodeImpl<S>,
+    S: ExprSchema,
 {
-    cast_expr: Expr<NIn, Ctx>,
+    cast_expr: Expr<NIn, S>,
     phantom: PhantomData<NOut>,
 }
 
-impl<NOut, NIn, Ctx> CastNumPrimitive<NOut, NIn, Ctx>
+impl<NOut, NIn, S> CastNumPrimitive<NOut, NIn, S>
 where
-    NOut: SelectExprNodeImpl<Ctx> + Copy + 'static,
-    NIn: SelectExprNodeImpl<Ctx> + AsPrimitive<NOut> + Copy,
-    Ctx: ReadContext,
+    NOut: SelectExprNodeImpl<S> + Copy + 'static,
+    NIn: SelectExprNodeImpl<S> + AsPrimitive<NOut> + Copy,
+    S: ExprSchema,
 {
-    pub fn new(expr: Expr<NIn, Ctx>) -> Self {
+    pub fn new(expr: Expr<NIn, S>) -> Self {
         Self {
             cast_expr: expr,
             phantom: Default::default(),
@@ -34,24 +34,24 @@ where
     }
 }
 
-impl<NOut, NIn, Ctx> Debug for CastNumPrimitive<NOut, NIn, Ctx>
+impl<NOut, NIn, S> Debug for CastNumPrimitive<NOut, NIn, S>
 where
-    NIn: SelectExprNodeImpl<Ctx>,
-    NOut: SelectExprNodeImpl<Ctx>,
-    Ctx: ReadContext,
+    NIn: SelectExprNodeImpl<S>,
+    NOut: SelectExprNodeImpl<S>,
+    S: ExprSchema,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "AsFloat<{},{}>", type_name::<NOut>(), type_name::<NIn>())
     }
 }
 
-impl<NIn, NOut, Ctx: ReadContext> ExprNode<NOut, Ctx> for CastNumPrimitive<NOut, NIn, Ctx>
+impl<NIn, NOut, S> ExprNode<NOut, S> for CastNumPrimitive<NOut, NIn, S>
 where
-    NIn: SelectExprNodeImpl<Ctx, Property = NIn> + AsPrimitive<NOut> + Send + Sync + Copy,
-    NOut: SelectExprNodeImpl<Ctx> + Num + Send + Sync + Copy + 'static,
-    Ctx: ReadContext,
+    NIn: SelectExprNodeImpl<S, Property = NIn> + AsPrimitive<NOut> + Send + Sync + Copy,
+    NOut: SelectExprNodeImpl<S> + Num + Send + Sync + Copy + 'static,
+    S: ExprSchema,
 {
-    fn eval(&self, ctx: &Ctx) -> Result<NOut, ExpressionError> {
+    fn eval<'w, 's>(&self, ctx: &S::Context<'w, 's>) -> Result<NOut, ExpressionError> {
         Ok(self.cast_expr.inner.eval(ctx)?.as_())
     }
 

@@ -1,4 +1,4 @@
-use crate::expr::ExpressionError;
+use crate::expr::{ExpressionError};
 use std::any::{type_name, Any};
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;

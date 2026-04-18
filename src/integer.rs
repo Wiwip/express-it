@@ -1,46 +1,46 @@
 use crate::context::{Path, ReadContext};
-use crate::expr::{Expr, ExprNode, ExpressionError, IfThenNode, SelectExprNodeImpl};
+use crate::expr::{Expr, ExprNode, ExprSchema, ExpressionError, IfThenNode, SelectExprNodeImpl};
 use crate::logic::BoolExpr;
 use crate::num_cast::CastFrom;
 use num_traits::{CheckedNeg, PrimInt};
 use std::collections::HashSet;
 
-pub enum IntExprNode<N: SelectExprNodeImpl<Ctx>, Ctx: ReadContext + 'static> {
+pub enum IntExprNode<N: SelectExprNodeImpl<S>, S: ExprSchema> {
     Lit(N),
     Attribute(Path),
-    Cast(Box<dyn ExprNode<N, Ctx>>),
+    Cast(Box<dyn ExprNode<N, S>>),
     UnaryOp {
         op: IntUnaryOp,
-        expr: Expr<N, Ctx>,
+        expr: Expr<N, S>,
     },
     BinaryOp {
-        lhs_expr: Expr<N, Ctx>,
+        lhs_expr: Expr<N, S>,
         op: IntBinaryOp,
-        rhs_expr: Expr<N, Ctx>,
+        rhs_expr: Expr<N, S>,
     },
     TrinaryOp {
-        value_expr: Expr<N, Ctx>,
+        value_expr: Expr<N, S>,
         op: IntTrinaryOp,
-        arg1_expr: Expr<N, Ctx>,
-        arg2_expr: Expr<N, Ctx>,
+        arg1_expr: Expr<N, S>,
+        arg2_expr: Expr<N, S>,
     },
     IfThenElseOp {
-        bool_expr: BoolExpr<Ctx>,
-        arg1_expr: Expr<N, Ctx>,
-        arg2_expr: Expr<N, Ctx>,
+        bool_expr: BoolExpr<S>,
+        arg1_expr: Expr<N, S>,
+        arg2_expr: Expr<N, S>,
     },
     ErrorHandlingOp {
-        expr: Expr<N, Ctx>,
-        or_expr: Expr<N, Ctx>,
+        expr: Expr<N, S>,
+        or_expr: Expr<N, S>,
     },
 }
 
-impl<N, Ctx> ExprNode<N, Ctx> for IntExprNode<N, Ctx>
+impl<N, S> ExprNode<N, S> for IntExprNode<N, S>
 where
-    N: PrimInt + CheckedNeg + SelectExprNodeImpl<Ctx, Property = N> + Send + Sync + 'static,
-    Ctx: ReadContext + 'static,
+    N: PrimInt + CheckedNeg + SelectExprNodeImpl<S, Property = N> + Send + Sync + 'static,
+    S: ExprSchema,
 {
-    fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
+    fn eval<'w, 's>(&self, ctx: &S::Context<'w, 's>) -> Result<N, ExpressionError> {
         match self {
             IntExprNode::Lit(lit) => Ok(*lit),
             IntExprNode::Attribute(key) => {
@@ -201,17 +201,17 @@ where
     }
 }
 
-impl<N, Ctx> IfThenNode<N, Ctx> for IntExprNode<N, Ctx>
+impl<N, S> IfThenNode<N, S> for IntExprNode<N, S>
 where
     N: PrimInt
         + CheckedNeg
-        + SelectExprNodeImpl<Ctx, Property = N, Node = IntExprNode<N, Ctx>>
+        + SelectExprNodeImpl<S, Property = N, Node = IntExprNode<N, S>>
         + Send
         + Sync
         + 'static,
-    Ctx: ReadContext + 'static,
+    S: ExprSchema,
 {
-    fn if_then(bool_expr: BoolExpr<Ctx>, t: Expr<N, Ctx>, f: Expr<N, Ctx>) -> Self {
+    fn if_then(bool_expr: BoolExpr<S>, t: Expr<N, S>, f: Expr<N, S>) -> Self {
         IntExprNode::IfThenElseOp {
             bool_expr,
             arg1_expr: t.into(),
@@ -220,12 +220,12 @@ where
     }
 }
 
-impl<N, Ctx> CastFrom<N, Ctx> for IntExprNode<N, Ctx>
+impl<N, S> CastFrom<N, S> for IntExprNode<N, S>
 where
-    N: SelectExprNodeImpl<Ctx, Property = N, Node = IntExprNode<N, Ctx>>,
-    Ctx: ReadContext,
+    N: SelectExprNodeImpl<S, Property = N, Node = IntExprNode<N, S>>,
+    S: ExprSchema,
 {
-    fn cast_from(node: Box<dyn ExprNode<N, Ctx>>) -> Self {
+    fn cast_from(node: Box<dyn ExprNode<N, S>>) -> Self {
         IntExprNode::Cast(node)
     }
 }
