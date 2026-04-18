@@ -50,7 +50,7 @@ impl Accessor for Path {
     }
 }
 
-pub trait ReadContext {
+pub trait ReadContext: Send + Sync {
     fn get_any(&self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError>;
     fn get_any_component(
         &self,
@@ -86,6 +86,20 @@ pub const fn fnv1a64(s: &str) -> u64 {
         i += 1;
     }
     hash
+}
+
+impl ReadContext for () {
+    fn get_any(&self, _access: &dyn Accessor) -> Result<&dyn Any, ExpressionError> {
+        Err(ExpressionError::MissingAttribute)
+    }
+
+    fn get_any_component(
+        &self,
+        _path: ScopeId,
+        _type_id: TypeId,
+    ) -> Result<&dyn Any, ExpressionError> {
+        Err(ExpressionError::MissingAttribute)
+    }
 }
 
 #[cfg(test)]

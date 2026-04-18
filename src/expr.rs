@@ -11,25 +11,27 @@ use std::fmt::Debug;
 use std::ops::Neg;
 use std::sync::Arc;
 
-pub trait ExprNode<N>: Send + Sync {
-    fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError>;
+pub trait ExprNode<N, Ctx>: Send + Sync {
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError>;
+    fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError>;
     fn get_dependencies(&self, deps: &mut std::collections::HashSet<Path>);
 }
 
-pub trait IfThenNode<N>: ExprNode<N> + Sized
+pub trait IfThenNode<N, Ctx>: ExprNode<N, Ctx> + Sized
 where
-    N: SelectExprNodeImpl,
+    N: SelectExprNodeImpl<Ctx>,
+    Ctx: ReadContext + 'static,
 {
-    fn if_then(bool_expr: BoolExpr, t: Expr<N>, f: Expr<N>) -> Self;
+    fn if_then(bool_expr: BoolExpr<Ctx>, t: Expr<N, Ctx>, f: Expr<N, Ctx>) -> Self;
 }
 
-pub struct Expr<N: SelectExprNodeImpl> {
-    pub inner: Arc<SelectExprNode<N>>,
-    phantom: std::marker::PhantomData<N>,
+pub struct Expr<N: SelectExprNodeImpl<Ctx>, Ctx> {
+    pub inner: Arc<SelectExprNode<N, Ctx>>,
+    phantom: std::marker::PhantomData<(N, Ctx)>,
 }
 
-impl<N: SelectExprNodeImpl> Expr<N> {
-    pub fn new(node: Arc<SelectExprNode<N>>) -> Self {
+impl<N: SelectExprNodeImpl<Ctx>, Ctx> Expr<N, Ctx> {
+    pub fn new(node: Arc<SelectExprNode<N, Ctx>>) -> Self {
         Expr {
             inner: node,
             phantom: Default::default(),
@@ -37,31 +39,32 @@ impl<N: SelectExprNodeImpl> Expr<N> {
     }
 }
 
-impl<N> Expr<N>
+impl<N, Ctx: ReadContext  + 'static> Expr<N, Ctx>
 where
-    N: SelectExprNodeImpl<Property = N> + Copy,
+    N: SelectExprNodeImpl<Ctx, Property = N> + Copy,
+    Ctx: ReadContext,
 {
-    pub fn as_<NOut>(&self) -> Expr<NOut>
+    pub fn as_<NOut>(&self) -> Expr<NOut, Ctx>
     where
-        NOut: SelectExprNodeImpl + Num + Copy + Send + Sync + 'static,
-        NOut::Node: CastFrom<NOut>,
+        NOut: SelectExprNodeImpl<Ctx> + Num + Copy + Send + Sync + 'static,
+        NOut::Node: CastFrom<NOut, Ctx>,
         N: AsPrimitive<NOut> + Send + Sync,
     {
-        let cast_node = CastNumPrimitive::new(self.clone());
+        let cast_node = CastNumPrimitive::<NOut, N, Ctx>::new(self.clone());
 
         let expr_node = NOut::Node::cast_from(Box::new(cast_node));
         Expr::new(Arc::new(expr_node))
     }
 
-    pub fn eval<Ctx: ReadContext>(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
+    pub fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
         self.inner.eval(ctx)
     }
 
     pub fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
-        self.inner.eval(ctx)
+        self.inner.eval_dyn(ctx)
     }
 
-    pub fn alias(&self, scope: impl Into<ScopeId>, name: &str) -> Assignment<N> {
+    pub fn alias(&self, scope: impl Into<ScopeId>, name: &str) -> Assignment<N, Ctx> {
         Assignment {
             path: Path::from_name(scope, name),
             expr: Expr::new(self.inner.clone()),
@@ -79,9 +82,14 @@ macro_rules! float_unary {
     };
 }
 
-impl<N> Expr<N>
+impl<N, Ctx> Expr<N, Ctx>
 where
-    N: Float + SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>> + Send + Sync + 'static,
+    N: Float
+        + SelectExprNodeImpl<Ctx, Property = N, Node = FloatExprNode<N, Ctx>>
+        + Send
+        + Sync
+        + 'static,
+    Ctx: ReadContext + 'static,
 {
     fn unary_expr(self, op: FloatUnaryOp) -> Self {
         Expr::new(Arc::new(FloatExprNode::UnaryOp { op, expr: self }))
@@ -106,7 +114,7 @@ where
     }
 }
 
-impl<N: SelectExprNodeImpl> Clone for Expr<N> {
+impl<N: SelectExprNodeImpl<Ctx>, Ctx: ReadContext  + 'static> Clone for Expr<N, Ctx> {
     fn clone(&self) -> Self {
         Expr::new(self.inner.clone())
     }
@@ -157,7 +165,7 @@ impl Error for ExpressionError {}
 macro_rules! impl_into_expr {
     // Inner rule for a single implementation
     (@impl $x:ty, $node:ident) => {
-        impl From<$x> for Expr<$x> {
+        impl<Ctx: ReadContext  + 'static> From<$x> for Expr<$x, Ctx> {
             fn from(value: $x) -> Self {
                 let value = Arc::new($node::Lit(value));
                 Expr::new(value)
@@ -176,20 +184,20 @@ impl_into_expr!(IntExprNode: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, 
 impl_into_expr!(FloatExprNode: f32, f64);
 impl_into_expr!(BoolExprNode: bool);
 
-pub trait SelectExprNodeImpl {
+pub trait SelectExprNodeImpl<Ctx=()> {
     type Property: Send + Sync;
-    type Node: ExprNode<Self::Property>;
+    type Node: ExprNode<Self::Property, Ctx>;
 }
 
-pub type SelectExprNode<T> = <T as SelectExprNodeImpl>::Node;
+pub type SelectExprNode<T, Ctx> = <T as SelectExprNodeImpl<Ctx>>::Node;
 
 #[macro_export]
 macro_rules! impl_select_expr {
     // Inner rule for a single implementation
     (@impl $x:ty, $select:ident) => {
-        impl SelectExprNodeImpl for $x {
+        impl<Ctx: ReadContext + 'static> SelectExprNodeImpl<Ctx> for $x {
             type Property = $x;
-            type Node = $select<Self::Property>;
+            type Node = $select<Self::Property, Ctx>;
         }
     };
     // Batch rule for multiple types mapping to the same Node
@@ -203,18 +211,19 @@ macro_rules! impl_select_expr {
 impl_select_expr!(IntExprNode: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_select_expr!(FloatExprNode: f32, f64);
 
-impl SelectExprNodeImpl for bool {
+impl<Ctx: Send + Sync + 'static> SelectExprNodeImpl<Ctx> for bool {
     type Property = bool;
-    type Node = BoolExprNode;
+    type Node = BoolExprNode<Ctx>;
 }
 
 macro_rules! impl_math_ops {
         ($($trait:ident => $method:ident),*,) => {
             $(
-                impl<N> std::ops::$trait<N> for Expr<N>
+                impl<N, Ctx> std::ops::$trait<N> for Expr<N, Ctx>
                 where
-                    N: Num + SelectExprNodeImpl<Property = N> ,
+                    N: Num + SelectExprNodeImpl<Ctx, Property = N> ,
                     Self: std::ops::$trait<Self, Output = Self> + From<N>,
+                    Ctx: ReadContext,
                 {
                     type Output = Self;
 
@@ -243,7 +252,7 @@ macro_rules! impl_neg_ops {
         $($t:ty),*
     ) => {
         $(
-            impl Neg for Expr<$t> {
+            impl<Ctx: ReadContext  + 'static> Neg for Expr<$t, Ctx> {
                 type Output = Self;
 
                 fn neg(self) -> Self::Output {
@@ -264,11 +273,12 @@ impl_neg_ops!(FloatExprNode,UnaryOp, FloatUnaryOp,Neg: f32, f64);
 // Signed Integer types (i8, i32, i64, etc.)
 impl_neg_ops!(IntExprNode,UnaryOp, IntUnaryOp,Neg: i8, i16, i32, i64, i128, isize);
 
-impl<N> CompareExpr for Expr<N>
+impl<N, Ctx> CompareExpr<Ctx> for Expr<N, Ctx>
 where
-    N: Num + SelectExprNodeImpl<Property = N> + PartialOrd + Copy + Send + Sync + 'static,
+    N: Num + SelectExprNodeImpl<Ctx, Property = N> + PartialOrd + Copy + Send + Sync + 'static,
+    Ctx: ReadContext + 'static,
 {
-    fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr {
+    fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
         let cmp = Compare {
             lhs: self,
             op,
@@ -286,7 +296,7 @@ macro_rules! impl_binary_std_ops {
         $($t:ty),*
     ) => {
         $(
-            impl std::ops::Add for Expr<$t>
+            impl<Ctx: ReadContext  + 'static> std::ops::Add for Expr<$t, Ctx>
             {
                 type Output = Self;
 
@@ -298,7 +308,7 @@ macro_rules! impl_binary_std_ops {
                     }))
                 }
             }
-            impl std::ops::Sub for Expr<$t>
+            impl<Ctx: ReadContext  + 'static> std::ops::Sub for Expr<$t, Ctx>
             {
                 type Output = Self;
 
@@ -310,7 +320,7 @@ macro_rules! impl_binary_std_ops {
                     }))
                 }
             }
-            impl std::ops::Mul for Expr<$t>
+            impl<Ctx: ReadContext  + 'static> std::ops::Mul for Expr<$t, Ctx>
             {
                 type Output = Self;
 
@@ -322,7 +332,7 @@ macro_rules! impl_binary_std_ops {
                     }))
                 }
             }
-            impl std::ops::Div for Expr<$t>
+            impl<Ctx: ReadContext  + 'static> std::ops::Div for Expr<$t, Ctx>
             {
                 type Output = Self;
 
@@ -334,7 +344,7 @@ macro_rules! impl_binary_std_ops {
                     }))
                 }
             }
-            impl std::ops::Rem for Expr<$t>
+            impl<Ctx: ReadContext  + 'static> std::ops::Rem for Expr<$t, Ctx>
             {
                 type Output = Self;
 
@@ -361,7 +371,7 @@ macro_rules! impl_binary_ops {
         $($t:ty),*
     ) => {
         $(
-            impl Expr<$t>
+            impl<Ctx: ReadContext  + 'static> Expr<$t, Ctx>
             {
                 fn binary_expr(self, op: $op_enum_path, rhs_expr: Self) -> Self {
                     Expr::new(Arc::new($node_enum_path::$node_variant_name {
@@ -406,7 +416,7 @@ macro_rules! impl_trinary_ops {
         $($t:ty),*
     ) => {
         $(
-            impl Expr<$t>
+            impl<Ctx: ReadContext  + 'static> Expr<$t, Ctx>
             {
                 fn trinary_expr(self, op: $op_enum_path, min_expr: Self, max_expr: Self) -> Self {
                     let node = $node_enum_path::$node_variant_name {

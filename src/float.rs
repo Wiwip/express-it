@@ -7,50 +7,116 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub enum FloatExprNode<N: SelectExprNodeImpl<Property = N>> {
+pub enum FloatExprNode<N: SelectExprNodeImpl<Ctx, Property = N>, Ctx: Send + Sync + 'static = ()> {
     Lit(N),
     Attribute(Path),
-    Cast(Box<dyn ExprNode<N>>),
+    Cast(Box<dyn ExprNode<N, Ctx>>),
     UnaryOp {
         op: FloatUnaryOp,
-        expr: Expr<N>,
+        expr: Expr<N, Ctx>,
     },
     BinaryOp {
-        lhs_expr: Expr<N>,
+        lhs_expr: Expr<N, Ctx>,
         op: FloatBinaryOp,
-        rhs_expr: Expr<N>,
+        rhs_expr: Expr<N, Ctx>,
     },
     TrinaryOp {
-        value_expr: Expr<N>,
+        value_expr: Expr<N, Ctx>,
         op: FloatTrinaryOp,
-        arg1_expr: Expr<N>,
-        arg2_expr: Expr<N>,
+        arg1_expr: Expr<N, Ctx>,
+        arg2_expr: Expr<N, Ctx>,
     },
     IfThenElseOp {
-        bool_expr: BoolExpr,
-        arg1_expr: Expr<N>,
-        arg2_expr: Expr<N>,
+        bool_expr: BoolExpr<Ctx>,
+        arg1_expr: Expr<N, Ctx>,
+        arg2_expr: Expr<N, Ctx>,
     },
     ErrorHandlingOp {
-        expr: Expr<N>,
-        or_expr: Expr<N>,
+        expr: Expr<N, Ctx>,
+        or_expr: Expr<N, Ctx>,
     },
 }
 
-impl<N> Into<Expr<N>> for FloatExprNode<N>
+impl<N, Ctx> Into<Expr<N, Ctx>> for FloatExprNode<N, Ctx>
 where
-    N: Float + SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>> + Send + Sync + 'static,
+    N: Float
+        + SelectExprNodeImpl<Ctx, Property = N, Node = FloatExprNode<N, Ctx>>
+        + Send
+        + Sync
+        + 'static,
+    Ctx: ReadContext,
 {
-    fn into(self) -> Expr<N> {
+    fn into(self) -> Expr<N, Ctx> {
         Expr::new(Arc::new(self))
     }
 }
 
-impl<N> ExprNode<N> for FloatExprNode<N>
+impl<N, Ctx> ExprNode<N, Ctx> for FloatExprNode<N, Ctx>
 where
-    N: Float + SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>> + Send + Sync + 'static,
+    N: Float
+        + SelectExprNodeImpl<Ctx, Property = N, Node = FloatExprNode<N, Ctx>>
+        + Send
+        + Sync
+        + 'static,
+    Ctx: ReadContext + 'static,
 {
-    fn eval(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
+        match self {
+            FloatExprNode::Lit(lit) => Ok(*lit),
+            FloatExprNode::Attribute(key) => {
+                let value = ctx.get_any(key)?;
+
+                if let Some(val) = value.downcast_ref::<N>() {
+                    Ok(*val)
+                } else {
+                    Err(ExpressionError::InvalidTypes)
+                }
+            }
+            FloatExprNode::Cast(cast) => cast.eval_dyn(ctx),
+            FloatExprNode::UnaryOp { op, expr } => {
+                let value = expr.inner.eval_dyn(ctx)?;
+                op.eval(value)
+            }
+            FloatExprNode::BinaryOp {
+                lhs_expr: lhs,
+                op,
+                rhs_expr: rhs,
+            } => {
+                let l = lhs.inner.eval_dyn(ctx)?;
+                let r = rhs.inner.eval_dyn(ctx)?;
+                op.eval(l, r)
+            }
+            FloatExprNode::TrinaryOp {
+                value_expr,
+                op,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let value = value_expr.inner.eval_dyn(ctx)?;
+                let arg1 = arg1_expr.inner.eval_dyn(ctx)?;
+                let arg2 = arg2_expr.inner.eval_dyn(ctx)?;
+                op.eval(value, arg1, arg2)
+            }
+            FloatExprNode::IfThenElseOp {
+                bool_expr,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let bool_result = bool_expr.inner.eval_dyn(ctx)?;
+                if bool_result {
+                    arg1_expr.inner.eval_dyn(ctx)
+                } else {
+                    arg2_expr.inner.eval_dyn(ctx)
+                }
+            }
+            FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval_dyn(ctx) {
+                Ok(v) => Ok(v),
+                Err(_) => or_expr.inner.eval_dyn(ctx),
+            },
+        }
+    }
+
+    fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
         match self {
             FloatExprNode::Lit(lit) => Ok(*lit),
             FloatExprNode::Attribute(key) => {
@@ -64,7 +130,7 @@ where
             }
             FloatExprNode::Cast(cast) => cast.eval(ctx),
             FloatExprNode::UnaryOp { op, expr } => {
-                let value = expr.eval_dyn(ctx)?;
+                let value = expr.inner.eval(ctx)?;
                 op.eval(value)
             }
             FloatExprNode::BinaryOp {
@@ -72,8 +138,8 @@ where
                 op,
                 rhs_expr: rhs,
             } => {
-                let l = lhs.eval_dyn(ctx)?;
-                let r = rhs.eval_dyn(ctx)?;
+                let l = lhs.inner.eval(ctx)?;
+                let r = rhs.inner.eval(ctx)?;
                 op.eval(l, r)
             }
             FloatExprNode::TrinaryOp {
@@ -82,9 +148,9 @@ where
                 arg1_expr,
                 arg2_expr,
             } => {
-                let value = value_expr.eval_dyn(ctx)?;
-                let arg1 = arg1_expr.eval_dyn(ctx)?;
-                let arg2 = arg2_expr.eval_dyn(ctx)?;
+                let value = value_expr.inner.eval(ctx)?;
+                let arg1 = arg1_expr.inner.eval(ctx)?;
+                let arg2 = arg2_expr.inner.eval(ctx)?;
                 op.eval(value, arg1, arg2)
             }
             FloatExprNode::IfThenElseOp {
@@ -92,16 +158,16 @@ where
                 arg1_expr,
                 arg2_expr,
             } => {
-                let bool_result = bool_expr.eval_dyn(ctx)?;
+                let bool_result = bool_expr.inner.eval(ctx)?;
                 if bool_result {
-                    arg1_expr.eval_dyn(ctx)
+                    arg1_expr.inner.eval(ctx)
                 } else {
-                    arg2_expr.eval_dyn(ctx)
+                    arg2_expr.inner.eval(ctx)
                 }
             }
-            FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.eval_dyn(ctx) {
+            FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval(ctx) {
                 Ok(v) => Ok(v),
-                Err(_) => or_expr.eval_dyn(ctx),
+                Err(_) => or_expr.inner.eval(ctx),
             },
         }
     }
@@ -151,11 +217,16 @@ where
     }
 }
 
-impl<N> IfThenNode<N> for FloatExprNode<N>
+impl<N, Ctx> IfThenNode<N, Ctx> for FloatExprNode<N, Ctx>
 where
-    N: Float + SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>> + Send + Sync + 'static,
+    N: Float
+        + SelectExprNodeImpl<Ctx, Property = N, Node = FloatExprNode<N, Ctx>>
+        + Send
+        + Sync
+        + 'static,
+    Ctx: ReadContext,
 {
-    fn if_then(bool_expr: BoolExpr, t: Expr<N>, f: Expr<N>) -> Self {
+    fn if_then(bool_expr: BoolExpr<Ctx>, t: Expr<N, Ctx>, f: Expr<N, Ctx>) -> Self {
         FloatExprNode::IfThenElseOp {
             bool_expr,
             arg1_expr: t.into(),
@@ -164,11 +235,12 @@ where
     }
 }
 
-impl<N> CastFrom<N> for FloatExprNode<N>
+impl<N, Ctx> CastFrom<N, Ctx> for FloatExprNode<N, Ctx>
 where
-    N: SelectExprNodeImpl<Property = N, Node = FloatExprNode<N>>,
+    N: SelectExprNodeImpl<Ctx, Property = N, Node = FloatExprNode<N, Ctx>>,
+    Ctx: ReadContext,
 {
-    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self {
+    fn cast_from(node: Box<dyn ExprNode<N, Ctx>>) -> Self {
         FloatExprNode::Cast(node)
     }
 }
@@ -265,10 +337,10 @@ impl FloatTrinaryOp {
     }
 }
 
-pub struct FloatSelector<N: SelectExprNodeImpl> {
-    pub lhs: Expr<N>,
-    pub op: BoolExpr,
-    pub rhs: Expr<N>,
+pub struct FloatSelector<N: SelectExprNodeImpl<Ctx>, Ctx: ReadContext + 'static> {
+    pub lhs: Expr<N, Ctx>,
+    pub op: BoolExpr<Ctx>,
+    pub rhs: Expr<N, Ctx>,
 }
 
 #[cfg(test)]
@@ -288,7 +360,7 @@ mod tests {
     fn test_float_unary_ops() {
         let mut ctx = MapContext::default();
         ctx.insert::<Hp>(SRC, 16.0);
-
+        
         // Testing basic negation
         assert_eq!(Hp::get(SRC).neg().eval(&ctx).unwrap(), -16.0);
 

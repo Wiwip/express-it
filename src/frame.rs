@@ -11,18 +11,22 @@ pub trait ExprAttribute {
     type Property: Debug;
 }
 
-pub struct Assignment<N: SelectExprNodeImpl> {
+pub struct Assignment<N: SelectExprNodeImpl<Ctx>, Ctx> {
     pub path: Path,
-    pub expr: Expr<N>,
+    pub expr: Expr<N, Ctx>,
 }
 
-trait StepExecutor: Send + Sync {
+trait StepExecutor: Send + Sync + 'static {
     fn run(&self, read: &mut dyn Context);
 }
 
-impl<N: SelectExprNodeImpl + Send + Sync + 'static> StepExecutor for Assignment<N> {
+impl<N, Ctx> StepExecutor for Assignment<N, Ctx>
+where
+    N: SelectExprNodeImpl<Ctx> + Send + Sync + 'static,
+    Ctx: ReadContext + 'static,
+{
     fn run(&self, ctx: &mut dyn Context) {
-        let result = self.expr.inner.eval(ctx).unwrap_or_else(|_| {
+        let result = self.expr.inner.eval_dyn(ctx).unwrap_or_else(|_| {
             panic!(
                 "Executor failed. {} value could not be found in context.",
                 self.path
@@ -92,11 +96,12 @@ pub struct Step {
     exprs: Vec<Box<dyn StepExecutor>>,
 }
 
-impl<N> From<Assignment<N>> for Step
+impl<N, Ctx> From<Assignment<N, Ctx>> for Step
 where
-    N: Num + SelectExprNodeImpl + Send + Sync + 'static,
+    N: Num + SelectExprNodeImpl<Ctx> + Send + Sync + 'static,
+    Ctx: ReadContext + 'static,
 {
-    fn from(value: Assignment<N>) -> Self {
+    fn from(value: Assignment<N, Ctx>) -> Self {
         Step {
             exprs: vec![Box::new(value)],
         }
@@ -217,8 +222,8 @@ mod tests {
 
         lp.commit(&mut ctx);
 
-        let expr = FloatExprNode::Attribute(Path::from_type_name::<Hp>(DST));
-        let expr_result: f32 = expr.eval(&ctx).unwrap();
+        let expr =  FloatExprNode::<f32, MapContext>::Attribute(Path::from_type_name::<Hp>(DST));
+        let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }
 
@@ -231,8 +236,7 @@ mod tests {
         ctx.insert::<Def>(DST, 2.0);
 
         let dmg_taken_expr = Atk::get(SRC) - Def::get(DST);
-        let get_dmg_taken: Expr<f32> =
-            FloatExprNode::Attribute(Path::from_name(DST, "dmg_taken")).into();
+        let get_dmg_taken: Expr<f32, MapContext> = FloatExprNode::<f32, MapContext>::Attribute(Path::from_name(DST, "dmg_taken")).into();
 
         let lp = LazyPlan::new()
             .step(dmg_taken_expr.max(0.0).alias(DST, "dmg_taken"))
@@ -240,11 +244,11 @@ mod tests {
 
         lp.commit(&mut ctx);
 
-        let expr = FloatExprNode::<f32>::Attribute(Path::from_name(DST, "dmg_taken"));
+        let expr = FloatExprNode::<f32, MapContext>::Attribute(Path::from_name(DST, "dmg_taken"));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 8.0);
 
-        let expr = FloatExprNode::Attribute(Path::from_type_name::<Hp>(DST));
+        let expr = FloatExprNode::<f32, MapContext>::Attribute(Path::from_type_name::<Hp>(DST));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }

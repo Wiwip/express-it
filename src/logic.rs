@@ -6,66 +6,66 @@ use num_traits::Num;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub trait CompareExpr: Sized {
-    fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr;
+pub trait CompareExpr<Ctx: ReadContext + 'static>: Sized {
+    fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr<Ctx>;
 
-    fn gt(self, rhs: impl Into<Self>) -> BoolExpr {
+    fn gt(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
         self.compare(ComparisonOp::Gt, rhs)
     }
-    fn ge(self, rhs: impl Into<Self>) -> BoolExpr {
+    fn ge(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
         self.compare(ComparisonOp::Ge, rhs)
     }
-    fn lt(self, rhs: impl Into<Self>) -> BoolExpr {
+    fn lt(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
         self.compare(ComparisonOp::Lt, rhs)
     }
-    fn le(self, rhs: impl Into<Self>) -> BoolExpr {
+    fn le(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
         self.compare(ComparisonOp::Le, rhs)
     }
-    fn eq(self, rhs: impl Into<Self>) -> BoolExpr {
+    fn eq(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
         self.compare(ComparisonOp::Eq, rhs)
     }
-    fn ne(self, rhs: impl Into<Self>) -> BoolExpr {
+    fn ne(self, rhs: impl Into<Self>) -> BoolExpr<Ctx> {
         self.compare(ComparisonOp::Ne, rhs)
     }
 }
 
-pub type BoolExpr = Expr<bool>;
+pub type BoolExpr<Ctx> = Expr<bool, Ctx>;
 
-impl BoolExpr {
-    pub fn true_() -> BoolExpr {
+impl<Ctx: ReadContext + 'static> BoolExpr<Ctx> {
+    pub fn true_() -> BoolExpr<Ctx> {
         let node = BoolExprNode::Lit(true);
         BoolExpr::new(Arc::new(node))
     }
 
-    pub fn false_() -> BoolExpr {
+    pub fn false_() -> BoolExpr<Ctx> {
         let node = BoolExprNode::Lit(false);
         BoolExpr::new(Arc::new(node))
     }
 
     pub fn if_then_else<N>(
         self,
-        if_true_expr: impl Into<Expr<N>>,
-        if_false_expr: impl Into<Expr<N>>,
-    ) -> Expr<N>
+        if_true_expr: impl Into<Expr<N, Ctx>>,
+        if_false_expr: impl Into<Expr<N, Ctx>>,
+    ) -> Expr<N, Ctx>
     where
-        N: Num + SelectExprNodeImpl<Property = N> + Send + Sync + 'static,
-        SelectExprNode<N>: IfThenNode<N>,
+        N: Num + SelectExprNodeImpl<Ctx, Property = N> + Send + Sync,
+        SelectExprNode<N, Ctx>: IfThenNode<N, Ctx>,
     {
         // Convert once (avoid move errors from multiple `.into()` calls)
         let bool_expr = self;
-        let t: Expr<N> = if_true_expr.into();
-        let f: Expr<N> = if_false_expr.into();
+        let t: Expr<N, Ctx> = if_true_expr.into();
+        let f: Expr<N, Ctx> = if_false_expr.into();
 
         // Build the correct node type (int or float) via the trait, not via FloatExprNode directly
-        let node = <SelectExprNode<N> as IfThenNode<N>>::if_then(bool_expr, t, f);
+        let node = <SelectExprNode<N, Ctx> as IfThenNode<N, Ctx>>::if_then(bool_expr, t, f);
 
-        Expr::<N>::new(Arc::new(node))
+        Expr::<N, Ctx>::new(Arc::new(node))
     }
 
-    pub fn then<N>(self, if_true_expr: impl Into<Expr<N>>) -> PartialConditional<N>
+    pub fn then<N>(self, if_true_expr: impl Into<Expr<N, Ctx>>) -> PartialConditional<N, Ctx>
     where
-        N: Num + SelectExprNodeImpl<Property = N> + Send + Sync + 'static,
-        SelectExprNode<N>: IfThenNode<N>,
+        N: Num + SelectExprNodeImpl<Ctx, Property = N> + Send + Sync + 'static,
+        SelectExprNode<N, Ctx>: IfThenNode<N, Ctx>,
     {
         PartialConditional {
             bool_expr: self,
@@ -73,15 +73,15 @@ impl BoolExpr {
         }
     }
 
-    pub fn nand(self, other: BoolExpr) -> BoolExpr {
+    pub fn nand(self, other: BoolExpr<Ctx>) -> BoolExpr<Ctx> {
         !(self & other)
     }
 
-    pub fn nor(self, other: BoolExpr) -> BoolExpr {
+    pub fn nor(self, other: BoolExpr<Ctx>) -> BoolExpr<Ctx> {
         !(self | other)
     }
 
-    pub fn xnor(self, other: BoolExpr) -> BoolExpr {
+    pub fn xnor(self, other: BoolExpr<Ctx>) -> BoolExpr<Ctx> {
         !(self ^ other)
     }
 
@@ -94,8 +94,8 @@ impl BoolExpr {
     }
 }
 
-impl std::ops::Not for BoolExpr {
-    type Output = BoolExpr;
+impl<Ctx: ReadContext + 'static> std::ops::Not for BoolExpr<Ctx> {
+    type Output = BoolExpr<Ctx>;
 
     fn not(self) -> Self::Output {
         let node = BoolExprNode::UnaryOp {
@@ -106,8 +106,8 @@ impl std::ops::Not for BoolExpr {
     }
 }
 
-impl std::ops::BitAnd for BoolExpr {
-    type Output = BoolExpr;
+impl<Ctx: ReadContext + 'static> std::ops::BitAnd for BoolExpr<Ctx>{
+    type Output = BoolExpr<Ctx>;
 
     fn bitand(self, rhs: Self) -> Self::Output {
         let node = BoolExprNode::BinaryOp {
@@ -119,8 +119,8 @@ impl std::ops::BitAnd for BoolExpr {
     }
 }
 
-impl std::ops::BitOr for BoolExpr {
-    type Output = BoolExpr;
+impl<Ctx: ReadContext + 'static> std::ops::BitOr for BoolExpr<Ctx> {
+    type Output = BoolExpr<Ctx>;
 
     fn bitor(self, rhs: Self) -> Self::Output {
         let node = BoolExprNode::BinaryOp {
@@ -132,8 +132,8 @@ impl std::ops::BitOr for BoolExpr {
     }
 }
 
-impl std::ops::BitXor for BoolExpr {
-    type Output = BoolExpr;
+impl<Ctx: ReadContext + 'static> std::ops::BitXor for BoolExpr<Ctx> {
+    type Output = BoolExpr<Ctx>;
 
     fn bitxor(self, rhs: Self) -> Self::Output {
         let node = BoolExprNode::BinaryOp {
@@ -145,31 +145,50 @@ impl std::ops::BitXor for BoolExpr {
     }
 }
 
-pub enum BoolExprNode {
+pub enum BoolExprNode<Ctx: Send + Sync + 'static> {
     Lit(bool),
-    Boxed(Box<dyn ExprNode<bool>>),
+    Boxed(Box<dyn ExprNode<bool, Ctx>>),
     UnaryOp {
         op: LogicUnaryOp,
-        expr: BoolExpr,
+        expr: BoolExpr<Ctx>,
     },
     BinaryOp {
-        lhs: BoolExpr,
+        lhs: BoolExpr<Ctx>,
         op: LogicBinaryOp,
-        rhs: BoolExpr,
+        rhs: BoolExpr<Ctx>,
     },
 }
 
-impl ExprNode<bool> for BoolExprNode {
-    fn eval(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
+impl<Ctx: Send + Sync + 'static> ExprNode<bool, Ctx> for BoolExprNode<Ctx> {
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
+        match self {
+            BoolExprNode::Lit(lit) => Ok(lit.clone()),
+            BoolExprNode::Boxed(value) => Ok(value.eval_dyn(ctx)?),
+            BoolExprNode::UnaryOp { op, expr } => match op {
+                LogicUnaryOp::Not => Ok(!expr.inner.eval_dyn(ctx)?),
+            },
+            BoolExprNode::BinaryOp { lhs, op, rhs } => {
+                let l = lhs.inner.eval_dyn(ctx)?;
+                let r = rhs.inner.eval_dyn(ctx)?;
+                match op {
+                    LogicBinaryOp::And => Ok(l && r),
+                    LogicBinaryOp::Or => Ok(l || r),
+                    LogicBinaryOp::Xor => Ok(l ^ r),
+                }
+            }
+        }
+    }
+
+    fn eval(&self, ctx: &Ctx) -> Result<bool, ExpressionError> {
         match self {
             BoolExprNode::Lit(lit) => Ok(lit.clone()),
             BoolExprNode::Boxed(value) => Ok(value.eval(ctx)?),
             BoolExprNode::UnaryOp { op, expr } => match op {
-                LogicUnaryOp::Not => Ok(!expr.eval_dyn(ctx)?),
+                LogicUnaryOp::Not => Ok(!expr.inner.eval(ctx)?),
             },
             BoolExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.eval_dyn(ctx)?;
-                let r = rhs.eval_dyn(ctx)?;
+                let l = lhs.inner.eval(ctx)?;
+                let r = rhs.inner.eval(ctx)?;
                 match op {
                     LogicBinaryOp::And => Ok(l && r),
                     LogicBinaryOp::Or => Ok(l || r),
@@ -219,19 +238,26 @@ impl ComparisonOp {
     }
 }
 
-pub struct Compare<N: SelectExprNodeImpl> {
-    pub lhs: Expr<N>,
+pub struct Compare<N: SelectExprNodeImpl<Ctx>, Ctx> {
+    pub lhs: Expr<N, Ctx>,
     pub op: ComparisonOp,
-    pub rhs: Expr<N>,
+    pub rhs: Expr<N, Ctx>,
 }
 
-impl<N> ExprNode<bool> for Compare<N>
+impl<N, Ctx> ExprNode<bool, Ctx> for Compare<N, Ctx>
 where
-    N: SelectExprNodeImpl<Property = N> + PartialOrd + Send + Sync + Copy + 'static,
+    N: SelectExprNodeImpl<Ctx, Property = N> + PartialOrd + Send + Sync + Copy + 'static,
+    Ctx: ReadContext + 'static,
 {
-    fn eval(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
         let l = self.lhs.eval_dyn(ctx)?;
         let r = self.rhs.eval_dyn(ctx)?;
+        Ok(self.op.compare(&l, &r))
+    }
+
+    fn eval(&self, ctx: &Ctx) -> Result<bool, ExpressionError> {
+        let l = self.lhs.eval(ctx)?;
+        let r = self.rhs.eval(ctx)?;
         Ok(self.op.compare(&l, &r))
     }
 
@@ -253,24 +279,25 @@ pub enum LogicBinaryOp {
     Xor,
 }
 
-pub struct PartialConditional<N: SelectExprNodeImpl> {
-    pub bool_expr: BoolExpr,
-    pub if_true_expr: Expr<N>,
+pub struct PartialConditional<N: SelectExprNodeImpl<Ctx>, Ctx: ReadContext + 'static> {
+    pub bool_expr: BoolExpr<Ctx>,
+    pub if_true_expr: Expr<N, Ctx>,
 }
 
-impl<N> PartialConditional<N>
+impl<N, Ctx> PartialConditional<N, Ctx>
 where
-    N: Num + Send + Sync + 'static + SelectExprNodeImpl<Property = N>,
-    SelectExprNode<N>: IfThenNode<N>,
+    N: Num + Send + Sync + 'static + SelectExprNodeImpl<Ctx, Property = N>,
+    SelectExprNode<N, Ctx>: IfThenNode<N, Ctx>,
+    Ctx: ReadContext + 'static,
 {
-    pub fn otherwise(self, if_false_expr: impl Into<Expr<N>>) -> Expr<N> {
-        let node = <SelectExprNode<N> as IfThenNode<N>>::if_then(
+    pub fn otherwise(self, if_false_expr: impl Into<Expr<N, Ctx>>) -> Expr<N, Ctx> {
+        let node = <SelectExprNode<N, Ctx> as IfThenNode<N, Ctx>>::if_then(
             self.bool_expr,
             self.if_true_expr,
             if_false_expr.into(),
         );
 
-        Expr::<N>::new(Arc::new(node))
+        Expr::<N, Ctx>::new(Arc::new(node))
     }
 }
 

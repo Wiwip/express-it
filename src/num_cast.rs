@@ -6,25 +6,27 @@ use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
-pub trait CastFrom<N>: Sized {
-    fn cast_from(node: Box<dyn ExprNode<N>>) -> Self;
+pub trait CastFrom<N, Ctx>: Sized {
+    fn cast_from(node: Box<dyn ExprNode<N, Ctx>>) -> Self;
 }
 
-pub struct CastNumPrimitive<NOut, NIn>
+pub struct CastNumPrimitive<NOut, NIn, Ctx>
 where
-    NIn: SelectExprNodeImpl,
-    NOut: SelectExprNodeImpl,
+    NIn: SelectExprNodeImpl<Ctx>,
+    NOut: SelectExprNodeImpl<Ctx>,
+    Ctx: ReadContext,
 {
-    cast_expr: Expr<NIn>,
+    cast_expr: Expr<NIn, Ctx>,
     phantom: PhantomData<NOut>,
 }
 
-impl<NOut, NIn> CastNumPrimitive<NOut, NIn>
+impl<NOut, NIn, Ctx> CastNumPrimitive<NOut, NIn, Ctx>
 where
-    NOut: SelectExprNodeImpl + Copy + 'static,
-    NIn: SelectExprNodeImpl + AsPrimitive<NOut> + Copy,
+    NOut: SelectExprNodeImpl<Ctx> + Copy + 'static,
+    NIn: SelectExprNodeImpl<Ctx> + AsPrimitive<NOut> + Copy,
+    Ctx: ReadContext,
 {
-    pub fn new(expr: Expr<NIn>) -> Self {
+    pub fn new(expr: Expr<NIn, Ctx>) -> Self {
         Self {
             cast_expr: expr,
             phantom: Default::default(),
@@ -32,23 +34,29 @@ where
     }
 }
 
-impl<NOut, NIn> Debug for CastNumPrimitive<NOut, NIn>
+impl<NOut, NIn, Ctx> Debug for CastNumPrimitive<NOut, NIn, Ctx>
 where
-    NIn: SelectExprNodeImpl,
-    NOut: SelectExprNodeImpl,
+    NIn: SelectExprNodeImpl<Ctx>,
+    NOut: SelectExprNodeImpl<Ctx>,
+    Ctx: ReadContext,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "AsFloat<{},{}>", type_name::<NOut>(), type_name::<NIn>())
     }
 }
 
-impl<NIn, NOut> ExprNode<NOut> for CastNumPrimitive<NOut, NIn>
+impl<NIn, NOut, Ctx: ReadContext> ExprNode<NOut, Ctx> for CastNumPrimitive<NOut, NIn, Ctx>
 where
-    NIn: SelectExprNodeImpl<Property = NIn> + AsPrimitive<NOut> + Send + Sync + Copy,
-    NOut: SelectExprNodeImpl + Num + Send + Sync + Copy + 'static,
+    NIn: SelectExprNodeImpl<Ctx, Property = NIn> + AsPrimitive<NOut> + Send + Sync + Copy,
+    NOut: SelectExprNodeImpl<Ctx> + Num + Send + Sync + Copy + 'static,
+    Ctx: ReadContext,
 {
-    fn eval(&self, ctx: &dyn ReadContext) -> Result<NOut, ExpressionError> {
-        Ok(self.cast_expr.eval_dyn(ctx)?.as_())
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<NOut, ExpressionError> {
+        Ok(self.cast_expr.inner.eval_dyn(ctx)?.as_())
+    }
+
+    fn eval(&self, ctx: &Ctx) -> Result<NOut, ExpressionError> {
+        Ok(self.cast_expr.inner.eval(ctx)?.as_())
     }
 
     fn get_dependencies(&self, deps: &mut HashSet<Path>) {
