@@ -3,7 +3,7 @@ use crate::expr::{Expr, ExpressionError};
 use crate::float::FloatExprNode;
 use crate::frame::{Assignment, ExprAttribute};
 use crate::integer::IntExprNode;
-use std::any::{Any, TypeId};
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -40,11 +40,7 @@ impl ReadContext for MapContext {
         Ok(val.as_ref())
     }
 
-    fn get_any_component(
-        &self,
-        _path: ScopeId,
-        _type_id: TypeId,
-    ) -> Result<&dyn Any, ExpressionError> {
+    fn get_any_component(&self, _path: &Path) -> Result<&dyn Any, ExpressionError> {
         unreachable!()
     }
 }
@@ -64,7 +60,10 @@ pub struct Atk;
 
 impl Atk {
     #[allow(dead_code)]
-    pub fn set(key: impl Into<ScopeId>, expr: Expr<f32, MapContext>) -> Assignment<f32, MapContext> {
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: Expr<f32, MapContext>,
+    ) -> Assignment<f32, MapContext> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
@@ -81,7 +80,10 @@ pub struct Def;
 
 impl Def {
     #[allow(dead_code)]
-    pub fn set(key: impl Into<ScopeId>, expr: Expr<f32, MapContext>) -> Assignment<f32, MapContext> {
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: Expr<f32, MapContext>,
+    ) -> Assignment<f32, MapContext> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
@@ -97,7 +99,10 @@ impl ExprAttribute for Def {
 pub struct Hp;
 
 impl Hp {
-    pub fn set(key: impl Into<ScopeId>, expr: Expr<f32, MapContext>) -> Assignment<f32, MapContext> {
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: Expr<f32, MapContext>,
+    ) -> Assignment<f32, MapContext> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
@@ -114,7 +119,10 @@ pub struct IntAtk;
 
 impl IntAtk {
     #[allow(dead_code)]
-    pub fn set(key: impl Into<ScopeId>, expr: Expr<u32, MapContext>) -> Assignment<u32, MapContext> {
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: Expr<u32, MapContext>,
+    ) -> Assignment<u32, MapContext> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
@@ -131,7 +139,10 @@ pub struct IntDef;
 
 impl IntDef {
     #[allow(dead_code)]
-    pub fn set(key: impl Into<ScopeId>, expr: Expr<i32, MapContext>) -> Assignment<i32, MapContext> {
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: Expr<i32, MapContext>,
+    ) -> Assignment<i32, MapContext> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }
@@ -148,7 +159,10 @@ pub struct IntHp;
 
 impl IntHp {
     #[allow(dead_code)]
-    pub fn set(key: impl Into<ScopeId>, expr: Expr<u32, MapContext>) -> Assignment<u32, MapContext> {
+    pub fn set(
+        key: impl Into<ScopeId>,
+        expr: Expr<u32, MapContext>,
+    ) -> Assignment<u32, MapContext> {
         let path = Path::from_type_name::<Self>(key.into());
         Assignment { path, expr }
     }

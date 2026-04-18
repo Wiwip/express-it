@@ -51,12 +51,12 @@ where
     NOut: SelectExprNodeImpl<Ctx> + Num + Send + Sync + Copy + 'static,
     Ctx: ReadContext,
 {
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<NOut, ExpressionError> {
-        Ok(self.cast_expr.inner.eval_dyn(ctx)?.as_())
-    }
-
     fn eval(&self, ctx: &Ctx) -> Result<NOut, ExpressionError> {
         Ok(self.cast_expr.inner.eval(ctx)?.as_())
+    }
+
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<NOut, ExpressionError> {
+        Ok(self.cast_expr.inner.eval_dyn(ctx)?.as_())
     }
 
     fn get_dependencies(&self, deps: &mut HashSet<Path>) {

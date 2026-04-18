@@ -60,62 +60,6 @@ where
         + 'static,
     Ctx: ReadContext + 'static,
 {
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
-        match self {
-            FloatExprNode::Lit(lit) => Ok(*lit),
-            FloatExprNode::Attribute(key) => {
-                let value = ctx.get_any(key)?;
-
-                if let Some(val) = value.downcast_ref::<N>() {
-                    Ok(*val)
-                } else {
-                    Err(ExpressionError::InvalidTypes)
-                }
-            }
-            FloatExprNode::Cast(cast) => cast.eval_dyn(ctx),
-            FloatExprNode::UnaryOp { op, expr } => {
-                let value = expr.inner.eval_dyn(ctx)?;
-                op.eval(value)
-            }
-            FloatExprNode::BinaryOp {
-                lhs_expr: lhs,
-                op,
-                rhs_expr: rhs,
-            } => {
-                let l = lhs.inner.eval_dyn(ctx)?;
-                let r = rhs.inner.eval_dyn(ctx)?;
-                op.eval(l, r)
-            }
-            FloatExprNode::TrinaryOp {
-                value_expr,
-                op,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let value = value_expr.inner.eval_dyn(ctx)?;
-                let arg1 = arg1_expr.inner.eval_dyn(ctx)?;
-                let arg2 = arg2_expr.inner.eval_dyn(ctx)?;
-                op.eval(value, arg1, arg2)
-            }
-            FloatExprNode::IfThenElseOp {
-                bool_expr,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let bool_result = bool_expr.inner.eval_dyn(ctx)?;
-                if bool_result {
-                    arg1_expr.inner.eval_dyn(ctx)
-                } else {
-                    arg2_expr.inner.eval_dyn(ctx)
-                }
-            }
-            FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval_dyn(ctx) {
-                Ok(v) => Ok(v),
-                Err(_) => or_expr.inner.eval_dyn(ctx),
-            },
-        }
-    }
-
     fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
         match self {
             FloatExprNode::Lit(lit) => Ok(*lit),
@@ -168,6 +112,62 @@ where
             FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval(ctx) {
                 Ok(v) => Ok(v),
                 Err(_) => or_expr.inner.eval(ctx),
+            },
+        }
+    }
+
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
+        match self {
+            FloatExprNode::Lit(lit) => Ok(*lit),
+            FloatExprNode::Attribute(key) => {
+                let value = ctx.get_any(key)?;
+
+                if let Some(val) = value.downcast_ref::<N>() {
+                    Ok(*val)
+                } else {
+                    Err(ExpressionError::InvalidTypes)
+                }
+            }
+            FloatExprNode::Cast(cast) => cast.eval_dyn(ctx),
+            FloatExprNode::UnaryOp { op, expr } => {
+                let value = expr.inner.eval_dyn(ctx)?;
+                op.eval(value)
+            }
+            FloatExprNode::BinaryOp {
+                lhs_expr: lhs,
+                op,
+                rhs_expr: rhs,
+            } => {
+                let l = lhs.inner.eval_dyn(ctx)?;
+                let r = rhs.inner.eval_dyn(ctx)?;
+                op.eval(l, r)
+            }
+            FloatExprNode::TrinaryOp {
+                value_expr,
+                op,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let value = value_expr.inner.eval_dyn(ctx)?;
+                let arg1 = arg1_expr.inner.eval_dyn(ctx)?;
+                let arg2 = arg2_expr.inner.eval_dyn(ctx)?;
+                op.eval(value, arg1, arg2)
+            }
+            FloatExprNode::IfThenElseOp {
+                bool_expr,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let bool_result = bool_expr.inner.eval_dyn(ctx)?;
+                if bool_result {
+                    arg1_expr.inner.eval_dyn(ctx)
+                } else {
+                    arg2_expr.inner.eval_dyn(ctx)
+                }
+            }
+            FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval_dyn(ctx) {
+                Ok(v) => Ok(v),
+                Err(_) => or_expr.inner.eval_dyn(ctx),
             },
         }
     }
@@ -360,7 +360,7 @@ mod tests {
     fn test_float_unary_ops() {
         let mut ctx = MapContext::default();
         ctx.insert::<Hp>(SRC, 16.0);
-        
+
         // Testing basic negation
         assert_eq!(Hp::get(SRC).neg().eval(&ctx).unwrap(), -16.0);
 

@@ -106,7 +106,7 @@ impl<Ctx: ReadContext + 'static> std::ops::Not for BoolExpr<Ctx> {
     }
 }
 
-impl<Ctx: ReadContext + 'static> std::ops::BitAnd for BoolExpr<Ctx>{
+impl<Ctx: ReadContext + 'static> std::ops::BitAnd for BoolExpr<Ctx> {
     type Output = BoolExpr<Ctx>;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -160,25 +160,6 @@ pub enum BoolExprNode<Ctx: Send + Sync + 'static> {
 }
 
 impl<Ctx: Send + Sync + 'static> ExprNode<bool, Ctx> for BoolExprNode<Ctx> {
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
-        match self {
-            BoolExprNode::Lit(lit) => Ok(lit.clone()),
-            BoolExprNode::Boxed(value) => Ok(value.eval_dyn(ctx)?),
-            BoolExprNode::UnaryOp { op, expr } => match op {
-                LogicUnaryOp::Not => Ok(!expr.inner.eval_dyn(ctx)?),
-            },
-            BoolExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.inner.eval_dyn(ctx)?;
-                let r = rhs.inner.eval_dyn(ctx)?;
-                match op {
-                    LogicBinaryOp::And => Ok(l && r),
-                    LogicBinaryOp::Or => Ok(l || r),
-                    LogicBinaryOp::Xor => Ok(l ^ r),
-                }
-            }
-        }
-    }
-
     fn eval(&self, ctx: &Ctx) -> Result<bool, ExpressionError> {
         match self {
             BoolExprNode::Lit(lit) => Ok(lit.clone()),
@@ -189,6 +170,25 @@ impl<Ctx: Send + Sync + 'static> ExprNode<bool, Ctx> for BoolExprNode<Ctx> {
             BoolExprNode::BinaryOp { lhs, op, rhs } => {
                 let l = lhs.inner.eval(ctx)?;
                 let r = rhs.inner.eval(ctx)?;
+                match op {
+                    LogicBinaryOp::And => Ok(l && r),
+                    LogicBinaryOp::Or => Ok(l || r),
+                    LogicBinaryOp::Xor => Ok(l ^ r),
+                }
+            }
+        }
+    }
+
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
+        match self {
+            BoolExprNode::Lit(lit) => Ok(lit.clone()),
+            BoolExprNode::Boxed(value) => Ok(value.eval_dyn(ctx)?),
+            BoolExprNode::UnaryOp { op, expr } => match op {
+                LogicUnaryOp::Not => Ok(!expr.inner.eval_dyn(ctx)?),
+            },
+            BoolExprNode::BinaryOp { lhs, op, rhs } => {
+                let l = lhs.inner.eval_dyn(ctx)?;
+                let r = rhs.inner.eval_dyn(ctx)?;
                 match op {
                     LogicBinaryOp::And => Ok(l && r),
                     LogicBinaryOp::Or => Ok(l || r),
@@ -249,15 +249,15 @@ where
     N: SelectExprNodeImpl<Ctx, Property = N> + PartialOrd + Send + Sync + Copy + 'static,
     Ctx: ReadContext + 'static,
 {
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
-        let l = self.lhs.eval_dyn(ctx)?;
-        let r = self.rhs.eval_dyn(ctx)?;
-        Ok(self.op.compare(&l, &r))
-    }
-
     fn eval(&self, ctx: &Ctx) -> Result<bool, ExpressionError> {
         let l = self.lhs.eval(ctx)?;
         let r = self.rhs.eval(ctx)?;
+        Ok(self.op.compare(&l, &r))
+    }
+
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
+        let l = self.lhs.inner.eval_dyn(ctx)?;
+        let r = self.rhs.inner.eval_dyn(ctx)?;
         Ok(self.op.compare(&l, &r))
     }
 

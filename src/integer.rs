@@ -40,64 +40,6 @@ where
     N: PrimInt + CheckedNeg + SelectExprNodeImpl<Ctx, Property = N> + Send + Sync + 'static,
     Ctx: ReadContext + 'static,
 {
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
-        match self {
-            IntExprNode::Lit(lit) => Ok(*lit),
-            IntExprNode::Attribute(key) => {
-                let value = ctx.get_any(key)?;
-
-                if let Some(val) = value.downcast_ref::<N>() {
-                    Ok(*val)
-                } else {
-                    Err(ExpressionError::InvalidTypes)
-                }
-            }
-            IntExprNode::Cast(cast) => cast.eval_dyn(ctx),
-            IntExprNode::UnaryOp { op, expr } => match op {
-                IntUnaryOp::Neg => expr
-                    .eval_dyn(ctx)?
-                    .checked_neg()
-                    .ok_or(ExpressionError::InvalidOperationNeg),
-            },
-            IntExprNode::BinaryOp {
-                lhs_expr,
-                op,
-                rhs_expr,
-            } => {
-                let lhs = lhs_expr.eval_dyn(ctx)?;
-                let rhs = rhs_expr.eval_dyn(ctx)?;
-                op.eval(lhs, rhs)
-            }
-            IntExprNode::TrinaryOp {
-                value_expr,
-                op,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let value = value_expr.eval_dyn(ctx)?;
-                let arg1 = arg1_expr.eval_dyn(ctx)?;
-                let arg2 = arg2_expr.eval_dyn(ctx)?;
-                op.eval(value, arg1, arg2)
-            }
-            IntExprNode::IfThenElseOp {
-                bool_expr,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let bool_result = bool_expr.eval_dyn(ctx)?;
-                if bool_result {
-                    arg1_expr.eval_dyn(ctx)
-                } else {
-                    arg2_expr.eval_dyn(ctx)
-                }
-            }
-            IntExprNode::ErrorHandlingOp { expr, or_expr } => match expr.eval_dyn(ctx) {
-                Ok(v) => Ok(v),
-                Err(_) => or_expr.eval_dyn(ctx),
-            },
-        }
-    }
-
     fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
         match self {
             IntExprNode::Lit(lit) => Ok(*lit),
@@ -152,6 +94,64 @@ where
             IntExprNode::ErrorHandlingOp { expr, or_expr } => match expr.eval(ctx) {
                 Ok(v) => Ok(v),
                 Err(_) => or_expr.eval(ctx),
+            },
+        }
+    }
+
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
+        match self {
+            IntExprNode::Lit(lit) => Ok(*lit),
+            IntExprNode::Attribute(key) => {
+                let value = ctx.get_any(key)?;
+
+                if let Some(val) = value.downcast_ref::<N>() {
+                    Ok(*val)
+                } else {
+                    Err(ExpressionError::InvalidTypes)
+                }
+            }
+            IntExprNode::Cast(cast) => cast.eval_dyn(ctx),
+            IntExprNode::UnaryOp { op, expr } => match op {
+                IntUnaryOp::Neg => expr
+                    .inner.eval_dyn(ctx)?
+                    .checked_neg()
+                    .ok_or(ExpressionError::InvalidOperationNeg),
+            },
+            IntExprNode::BinaryOp {
+                lhs_expr,
+                op,
+                rhs_expr,
+            } => {
+                let lhs = lhs_expr.inner.eval_dyn(ctx)?;
+                let rhs = rhs_expr.inner.eval_dyn(ctx)?;
+                op.eval(lhs, rhs)
+            }
+            IntExprNode::TrinaryOp {
+                value_expr,
+                op,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let value = value_expr.inner.eval_dyn(ctx)?;
+                let arg1 = arg1_expr.inner.eval_dyn(ctx)?;
+                let arg2 = arg2_expr.inner.eval_dyn(ctx)?;
+                op.eval(value, arg1, arg2)
+            }
+            IntExprNode::IfThenElseOp {
+                bool_expr,
+                arg1_expr,
+                arg2_expr,
+            } => {
+                let bool_result = bool_expr.inner.eval_dyn(ctx)?;
+                if bool_result {
+                    arg1_expr.inner.eval_dyn(ctx)
+                } else {
+                    arg2_expr.inner.eval_dyn(ctx)
+                }
+            }
+            IntExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval_dyn(ctx) {
+                Ok(v) => Ok(v),
+                Err(_) => or_expr.inner.eval_dyn(ctx),
             },
         }
     }

@@ -1,6 +1,5 @@
 use crate::context::{Path, ReadContext, ScopeId};
 use crate::float::{FloatBinaryOp, FloatExprNode, FloatTrinaryOp, FloatUnaryOp};
-use crate::frame::Assignment;
 use crate::integer::{IntBinaryOp, IntUnaryOp};
 use crate::integer::{IntExprNode, IntTrinaryOp};
 use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
@@ -10,10 +9,11 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::ops::Neg;
 use std::sync::Arc;
+use crate::frame::Assignment;
 
 pub trait ExprNode<N, Ctx>: Send + Sync {
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError>;
     fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError>;
+    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError>;
     fn get_dependencies(&self, deps: &mut std::collections::HashSet<Path>);
 }
 
@@ -58,10 +58,6 @@ where
 
     pub fn eval(&self, ctx: &Ctx) -> Result<N, ExpressionError> {
         self.inner.eval(ctx)
-    }
-
-    pub fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
-        self.inner.eval_dyn(ctx)
     }
 
     pub fn alias(&self, scope: impl Into<ScopeId>, name: &str) -> Assignment<N, Ctx> {
@@ -184,7 +180,7 @@ impl_into_expr!(IntExprNode: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, 
 impl_into_expr!(FloatExprNode: f32, f64);
 impl_into_expr!(BoolExprNode: bool);
 
-pub trait SelectExprNodeImpl<Ctx=()> {
+pub trait SelectExprNodeImpl<Ctx> {
     type Property: Send + Sync;
     type Node: ExprNode<Self::Property, Ctx>;
 }

@@ -74,8 +74,7 @@ impl<R: ReadContext> ReadContext for CachedEvalContext<'_, R> {
 
     fn get_any_component(
         &self,
-        _path: ScopeId,
-        _type_id: std::any::TypeId,
+        _path: &Path,
     ) -> Result<&dyn Any, ExpressionError> {
         unreachable!()
     }
@@ -173,7 +172,7 @@ impl LazyPlan {
     }
 
     /// Commit the expression plan
-    pub fn commit<RW: ReadContext + WriteContext>(&self, ctx: &mut RW) {
+    pub fn commit<Ctx: ReadContext + WriteContext>(&self, ctx: &mut Ctx) {
         let output = self.eval(ctx);
         self.flush(output, ctx);
     }
@@ -207,8 +206,17 @@ mod tests {
     use crate::test_utils::scopes::{DST, SRC};
     use crate::test_utils::{Atk, Def, Hp, MapContext};
 
+    fn init(){
+        let _ = env_logger::builder()
+            .filter_level(log::LevelFilter::Trace) // Allow everything up to Trace
+            .is_test(true)
+            .try_init();
+    }
+
     #[test]
     fn test_sequential_ops() {
+        init();
+
         let mut ctx = MapContext::default();
         ctx.insert::<Atk>(SRC, 10.0);
 
@@ -229,6 +237,8 @@ mod tests {
 
     #[test]
     fn test_interim_ops() {
+        init();
+
         let mut ctx = MapContext::default();
         ctx.insert::<Atk>(SRC, 10.0);
 
