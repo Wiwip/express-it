@@ -12,7 +12,7 @@ use std::sync::Arc;
 use crate::frame::Assignment;
 
 pub trait ExprSchema: Send + Sync + 'static {
-    type Context<'w, 's>: ReadContext;
+    type Context<'w, 's: 'w>: ReadContext;
 }
 
 pub trait ExprNode<N, S>: Send + Sync + 'static
@@ -192,7 +192,7 @@ pub trait SelectExprNodeImpl<S: ExprSchema> {
     type Node: ExprNode<Self::Property, S>;
 }
 
-pub type SelectExprNode<T, Ctx> = <T as SelectExprNodeImpl<Ctx>>::Node;
+pub type SelectExprNode<T, S> = <T as SelectExprNodeImpl<S>>::Node;
 
 #[macro_export]
 macro_rules! impl_select_expr {
@@ -441,6 +441,18 @@ macro_rules! impl_trinary_ops {
 
 impl_trinary_ops!(IntExprNode, TrinaryOp, IntTrinaryOp: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_trinary_ops!(FloatExprNode, TrinaryOp, FloatTrinaryOp:  f32, f64);
+
+pub trait AttributeNodeProvider<S: ExprSchema> {
+    fn new_attribute(path: Path) -> Self;
+}
+
+impl<N: SelectExprNodeImpl<S, Property = N>, S: ExprSchema> AttributeNodeProvider<S> for IntExprNode<N, S> {
+    fn new_attribute(path: Path) -> Self { Self::Attribute(path) }
+}
+
+impl<N: SelectExprNodeImpl<S, Property = N>, S: ExprSchema> AttributeNodeProvider<S> for FloatExprNode<N, S> {
+    fn new_attribute(path: Path) -> Self { Self::Attribute(path) }
+}
 
 #[cfg(test)]
 mod tests {

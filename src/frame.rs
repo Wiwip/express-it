@@ -70,10 +70,6 @@ impl<Ctx: ReadContext> ReadContext for CachedEvalContext<'_, Ctx> {
             self.read_ctx.get_any(access)
         }
     }
-
-    fn get_any_component(&self, _path: &Path) -> Result<&dyn Any, ExpressionError> {
-        unreachable!()
-    }
 }
 
 impl<W> WriteContext for CachedEvalContext<'_, W> {

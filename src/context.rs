@@ -52,10 +52,6 @@ impl Accessor for Path {
 
 pub trait ReadContext: Send + Sync {
     fn get_any(&self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError>;
-    fn get_any_component(
-        &self,
-        path: &Path,
-    ) -> Result<&dyn Any, ExpressionError>;
 }
 
 pub trait WriteContext {

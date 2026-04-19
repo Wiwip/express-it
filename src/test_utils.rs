@@ -23,7 +23,7 @@ pub trait ExprAttribute {
 pub struct MapSchema;
 
 impl ExprSchema for MapSchema {
-    type Context<'w, 's> = MapContext;
+    type Context<'w, 's> = MapContext where 's: 'w;
 }
 
 #[derive(Default, Debug)]
@@ -50,10 +50,6 @@ impl ReadContext for MapContext {
             .get(&(access.scope(), access.path()))
             .ok_or(ExpressionError::MissingAttribute)?;
         Ok(val.as_ref())
-    }
-
-    fn get_any_component(&self, _path: &Path) -> Result<&dyn Any, ExpressionError> {
-        unreachable!()
     }
 }
 
