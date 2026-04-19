@@ -347,7 +347,7 @@ pub struct FloatSelector<N: SelectExprNodeImpl<S>, S: ExprSchema> {
 mod tests {
     use super::*;
     use crate::expr::ExpressionError;
-    use crate::test_utils::scopes::{DST, ERROR_SCOPE, SRC};
+    use crate::test_utils::scopes::{DST, SRC};
     use crate::test_utils::{Atk, Hp, MapContext};
     use std::ops::Neg;
 
@@ -442,11 +442,11 @@ mod tests {
         assert_eq!(div_zero.eval(&ctx).unwrap(), f32::INFINITY);
 
         // Error Handling (Fallback)
-        let expr = Atk::get(ERROR_SCOPE).unwrap_or(Atk::get(DST));
+        let expr = Atk::get("nothing").unwrap_or(Atk::get(DST));
         assert_eq!(expr.eval(&ctx).unwrap(), 10.0);
 
         // Missing Attribute Error
-        let missing = Atk::get(ERROR_SCOPE);
+        let missing = Atk::get("nothing");
         assert_eq!(missing.eval(&ctx), Err(ExpressionError::MissingAttribute));
     }
 }

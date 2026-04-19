@@ -313,7 +313,7 @@ impl IntTrinaryOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::scopes::{DST, ERROR_SCOPE, SRC};
+    use crate::test_utils::scopes::{DST, SRC};
     use crate::test_utils::{IntAtk, IntDef, IntHp, MapContext};
     use std::ops::Neg;
 
@@ -398,7 +398,7 @@ mod tests {
         let mut ctx = MapContext::default();
         ctx.insert::<IntAtk>(SRC, 999); // Fallback value
 
-        let expr = IntAtk::get(ERROR_SCOPE).unwrap_or(IntAtk::get(SRC));
+        let expr = IntAtk::get("nothing").unwrap_or(IntAtk::get(SRC));
 
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 999);
@@ -415,7 +415,7 @@ mod tests {
         assert_eq!(expr_div.eval(&ctx), Err(ExpressionError::DivisionByZero));
 
         // Missing Attribute
-        let expr_missing = IntAtk::get(ERROR_SCOPE);
+        let expr_missing = IntAtk::get("nothing");
         assert_eq!(
             expr_missing.eval(&ctx),
             Err(ExpressionError::MissingAttribute)

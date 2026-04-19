@@ -248,15 +248,15 @@ mod tests {
 
         let dmg_taken_expr = Atk::get(SRC) - Def::get(DST);
         let get_dmg_taken: Expr<f32, MapSchema> =
-            FloatExprNode::Attribute(Path::from_name(DST, "dmg_taken")).into();
+            FloatExprNode::Attribute(Path::from_name("dst.dmg_taken")).into();
 
         let lp = LazyPlan::new()
-            .step(dmg_taken_expr.max(0.0).alias(DST, "dmg_taken"))
+            .step(dmg_taken_expr.max(0.0).alias("dst.dmg_taken"))
             .step(Hp::set(DST, Hp::get(DST) - get_dmg_taken));
 
         lp.commit(&mut ctx).expect("Failed to commit");
 
-        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_name(DST, "dmg_taken"));
+        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_name("dst.dmg_taken"));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 8.0);
 

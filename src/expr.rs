@@ -1,16 +1,16 @@
-use std::borrow::Cow;
-use crate::context::{Path, ReadContext, SubjectId};
+use crate::context::{Path, ReadContext};
 use crate::float::{FloatBinaryOp, FloatExprNode, FloatTrinaryOp, FloatUnaryOp};
+use crate::frame::Assignment;
 use crate::integer::{IntBinaryOp, IntUnaryOp};
 use crate::integer::{IntExprNode, IntTrinaryOp};
 use crate::logic::{BoolExpr, BoolExprNode, Compare, CompareExpr, ComparisonOp};
 use crate::num_cast::{CastFrom, CastNumPrimitive};
 use num_traits::{AsPrimitive, Float, Num};
+use smol_str::SmolStr;
 use std::error::Error;
 use std::fmt::Debug;
 use std::ops::Neg;
 use std::sync::Arc;
-use crate::frame::Assignment;
 
 pub trait ExprSchema: Send + Sync + 'static {
     type Context<'w, 's: 'w>: ReadContext;
@@ -68,9 +68,9 @@ where
         self.inner.eval(ctx)
     }
 
-    pub fn alias(&self, scope: impl Into<SubjectId>, name: impl Into<Cow<'static, str>>) -> Assignment<N, S> {
+    pub fn alias(&self, name: impl Into<SmolStr>) -> Assignment<N, S> {
         Assignment {
-            path: Path::new(scope.into(), name),
+            path: Path::new(name),
             expr: Expr::new(self.inner.clone()),
         }
     }
@@ -467,8 +467,10 @@ mod tests {
         let mut deps = std::collections::HashSet::new();
         expr.inner.get_dependencies(&mut deps);
 
-        assert!(deps.contains(&Path::from_type_name::<Atk>(SRC)));
-        assert!(deps.contains(&Path::from_type_name::<Hp>(DST)));
+        println!("deps: {:?}", deps);
+
+        assert!(deps.contains(&Path::new("src.atk")));
+        assert!(deps.contains(&Path::new("dst.hp")));
         assert_eq!(deps.len(), 2);
     }
 
