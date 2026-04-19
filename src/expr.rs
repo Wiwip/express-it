@@ -128,7 +128,7 @@ impl<N: SelectExprNodeImpl<S>, S: ExprSchema> Clone for Expr<N, S> {
 pub enum ExpressionError {
     MissingAttribute,
     InvalidTypes,
-    InvalidPath,
+    InvalidPath(SmolStr),
     InvalidOperationNeg,
     DivisionByZero,
     DowncastError,
@@ -156,8 +156,8 @@ impl std::fmt::Display for ExpressionError {
             ExpressionError::FailedReflect(msg) => {
                 write!(f, "Failed to reflect expression. Error: {}", msg)
             }
-            ExpressionError::InvalidPath => {
-                write!(f, "Invalid path, no expression found at destination.")
+            ExpressionError::InvalidPath(path) => {
+                write!(f, "Invalid path: {:?}", path)
             }
         }
     }
@@ -469,8 +469,8 @@ mod tests {
 
         println!("deps: {:?}", deps);
 
-        assert!(deps.contains(&Path::new("src.atk")));
-        assert!(deps.contains(&Path::new("dst.hp")));
+        assert!(deps.contains(&Path::new("src.Atk.val")));
+        assert!(deps.contains(&Path::new("dst.Hp.val")));
         assert_eq!(deps.len(), 2);
     }
 
@@ -480,8 +480,8 @@ mod tests {
         let mut deps = std::collections::HashSet::new();
         expr.inner.get_dependencies(&mut deps);
 
-        assert!(deps.contains(&Path::from_type_name::<IntAtk>(SRC)));
-        assert!(deps.contains(&Path::from_type_name::<IntHp>(DST)));
+        assert!(deps.contains(&Path::from_type_name::<IntAtk>(SRC, "val")));
+        assert!(deps.contains(&Path::from_type_name::<IntHp>(DST, "val")));
         assert_eq!(deps.len(), 2);
     }
 }

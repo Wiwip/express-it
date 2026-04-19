@@ -41,7 +41,7 @@ impl MapContext {
     ) where
         T::Property: Send + Sync,
     {
-        let path = Path::from_type_name::<T>(subject);
+        let path = Path::from_type_name::<T>(subject, "val");
         self.0.insert(path, Box::new(value));
     }
 }
@@ -74,11 +74,11 @@ impl Atk {
         expr: Expr<<Atk as ExprAttribute>::Property, MapSchema>,
     ) -> Assignment<<Atk as ExprAttribute>::Property, MapSchema>
     {
-        let path = Path::from_type_name::<Self>(subject.into());
+        let path = Path::from_type_name::<Self>(subject.into(), "val");
         Assignment { path, expr }
     }
     pub fn get(scope: impl Into<SmolStr>) -> Expr<f32, MapSchema> {
-        let expr = FloatExprNode::Attribute(Path::from_type_name::<Self>(scope));
+        let expr = FloatExprNode::Attribute(Path::from_type_name::<Self>(scope, "val"));
         Expr::new(Arc::new(expr))
     }
 }
@@ -91,11 +91,11 @@ pub struct Def;
 impl Def {
     #[allow(unused)]
     pub fn set(subject: impl Into<SmolStr>, expr: Expr<f32, MapSchema>) -> Assignment<f32, MapSchema> {
-        let path = Path::from_type_name::<Self>(subject);
+        let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }
     pub fn get(subject: impl Into<SmolStr>) -> Expr<f32, MapSchema> {
-        let expr = FloatExprNode::Attribute(Path::from_type_name::<Self>(subject));
+        let expr = FloatExprNode::Attribute(Path::from_type_name::<Self>(subject, "val"));
         Expr::new(Arc::new(expr))
     }
 }
@@ -108,11 +108,11 @@ pub struct Hp;
 impl Hp {
     #[allow(unused)]
     pub fn set(subject: impl Into<SmolStr>, expr: Expr<f32, MapSchema>) -> Assignment<f32, MapSchema> {
-        let path = Path::from_type_name::<Self>(subject);
+        let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }
     pub fn get(subject: impl Into<SmolStr>) -> Expr<f32, MapSchema> {
-        let expr = FloatExprNode::Attribute(Path::from_type_name::<Self>(subject));
+        let expr = FloatExprNode::Attribute(Path::from_type_name::<Self>(subject, "val"));
         Expr::new(Arc::new(expr))
     }
 }
@@ -125,11 +125,11 @@ pub struct IntAtk;
 impl IntAtk {
     #[allow(unused)]
     pub fn set(subject: impl Into<SmolStr>, expr: Expr<u32, MapSchema>) -> Assignment<u32, MapSchema> {
-        let path = Path::from_type_name::<Self>(subject);
+        let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }
     pub fn get(subject: impl Into<SmolStr>) -> Expr<u32, MapSchema> {
-        let expr = IntExprNode::Attribute(Path::from_type_name::<Self>(subject));
+        let expr = IntExprNode::Attribute(Path::from_type_name::<Self>(subject, "val"));
         Expr::new(Arc::new(expr))
     }
 }
@@ -142,11 +142,11 @@ pub struct IntDef;
 impl IntDef {
     #[allow(unused)]
     pub fn set(subject: impl Into<SmolStr>, expr: Expr<i32, MapSchema>) -> Assignment<i32, MapSchema> {
-        let path = Path::from_type_name::<Self>(subject);
+        let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }
     pub fn get(subject: impl Into<SmolStr>) -> Expr<i32, MapSchema> {
-        let expr = IntExprNode::Attribute(Path::from_type_name::<Self>(subject));
+        let expr = IntExprNode::Attribute(Path::from_type_name::<Self>(subject, "val"));
         Expr::new(Arc::new(expr))
     }
 }
@@ -159,11 +159,11 @@ pub struct IntHp;
 impl IntHp {
     #[allow(unused)]
     pub fn set(subject: impl Into<SmolStr>, expr: Expr<u32, MapSchema>) -> Assignment<u32, MapSchema> {
-        let path = Path::from_type_name::<Self>(subject);
+        let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }
     pub fn get(subject: impl Into<SmolStr>) -> Expr<u32, MapSchema> {
-        let expr = IntExprNode::Attribute(Path::from_type_name::<Self>(subject));
+        let expr = IntExprNode::Attribute(Path::from_type_name::<Self>(subject, "val"));
         Expr::new(Arc::new(expr))
     }
 }

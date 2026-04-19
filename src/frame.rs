@@ -231,7 +231,7 @@ mod tests {
 
         lp.commit(&mut ctx).expect("Failed to commit");
 
-        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST));
+        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST, "val"));
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }
@@ -260,7 +260,7 @@ mod tests {
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 8.0);
 
-        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST));
+        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST, "val"));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }

@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 log = "0.4"
 num-traits = "0.2"
-smol_str = "0.3.6"
+smol_str = "0.2.2"
 
 [dev-dependencies]
 env_logger = "0.11"

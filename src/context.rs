@@ -6,19 +6,23 @@ use std::hash::Hash;
 
 /// The human-readable path used by your user library to build expressions.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Path(SmolStr);
+pub struct Path(pub SmolStr);
 
 impl Path {
     pub fn new(path: impl Into<SmolStr>) -> Self {
-        Self(path.into().to_lowercase().into())
+        Self(path.into())
     }
 
     /// Automatically uses the Rust type name as the root
-    pub fn from_type_name<T: 'static>(subject: impl Into<SmolStr>) -> Self {
-        let subject = subject.into();
+    pub fn from_type_name<T: 'static>(
+        prefix: impl Into<SmolStr>,
+        suffix: impl Into<SmolStr>,
+    ) -> Self {
+        let prefix = prefix.into();
+        let suffix = suffix.into();
         let name = Self::get_short_name::<T>();
 
-        let path = format!("{}.{}", subject, name.to_lowercase());
+        let path = format!("{}.{}.{}", prefix, name, suffix);
         Self(SmolStr::new(path))
     }
 
@@ -32,7 +36,7 @@ impl Path {
     }
 
     fn get_short_name<T>() -> &'static str {
-        let full_name =  std::any::type_name::<T>();
+        let full_name = std::any::type_name::<T>();
         full_name.split("::").last().unwrap_or(full_name)
     }
 }
