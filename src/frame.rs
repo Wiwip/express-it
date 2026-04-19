@@ -1,4 +1,4 @@
-use crate::context::{Accessor, Path, ReadContext, ScopeId, WriteContext};
+use crate::context::{Path, ReadContext, WriteContext};
 use crate::expr::{Expr, ExprNode, ExprSchema, ExpressionError, SelectExprNodeImpl};
 use log::trace;
 use num_traits::Num;
@@ -35,7 +35,7 @@ where
 /// Writes-back to the world only when commit is called.
 pub struct CachedEvalContext<'a, Ctx> {
     read_ctx: &'a Ctx,
-    shadow: HashMap<(ScopeId, u64), Box<dyn Any + Send + Sync>>,
+    shadow: HashMap<Path, Box<dyn Any + Send + Sync>>,
 }
 
 impl<'a, Ctx> CachedEvalContext<'a, Ctx> {
@@ -58,16 +58,16 @@ impl<'a, Ctx> CachedEvalContext<'a, Ctx> {
 impl<Ctx: ReadContext> Context for CachedEvalContext<'_, Ctx> {}
 
 impl<Ctx: ReadContext> ReadContext for CachedEvalContext<'_, Ctx> {
-    fn get_any(&self, access: &dyn Accessor) -> Result<&dyn Any, ExpressionError> {
-        if let Some(value) = self.shadow.get(&access.key()) {
-            trace!("Cache hit for path: {:?}", access.key());
+    fn get_any(&self, path: &Path) -> Result<&dyn Any, ExpressionError> {
+        if let Some(value) = self.shadow.get(path) {
+            trace!("Cache hit for path: {:?}", path);
             Ok(value.as_ref())
         } else {
             trace!(
                 "Cache miss for path: {:?}, fetching from source",
-                access.key()
+                path
             );
-            self.read_ctx.get_any(access)
+            self.read_ctx.get_any(path)
         }
     }
 }
@@ -75,11 +75,11 @@ impl<Ctx: ReadContext> ReadContext for CachedEvalContext<'_, Ctx> {
 impl<W> WriteContext for CachedEvalContext<'_, W> {
     fn write(
         &mut self,
-        access: &dyn Accessor,
+        path: &Path,
         value: Box<dyn Any + Send + Sync>,
     ) -> Result<(), ExpressionError> {
-        trace!("Writing to shadow: {:?}", access.key());
-        self.shadow.insert(access.key(), value);
+        trace!("Writing to shadow: {:?}", path);
+        self.shadow.insert(path.clone(), value);
         Ok(())
     }
 }
@@ -186,16 +186,12 @@ impl LazyPlan {
 /// This is intentionally detached from the original read context so we can
 /// drop all read borrows before flushing into a write context.
 pub struct PlanResults {
-    shadow: HashMap<(ScopeId, u64), Box<dyn Any + Send + Sync>>,
+    shadow: HashMap<Path, Box<dyn Any + Send + Sync>>,
 }
 
 impl PlanResults {
     pub fn flush_into<W: WriteContext>(mut self, write: &mut W) {
-        for (key, value) in self.shadow.drain() {
-            let path = Path {
-                scope: key.0,
-                id: key.1,
-            };
+        for (path, value) in self.shadow.drain() {
             trace!("Flushing result for path: {:?}", path);
             let _ = write.write(&path, value);
         }

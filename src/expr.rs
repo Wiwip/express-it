@@ -1,4 +1,5 @@
-use crate::context::{Path, ReadContext, ScopeId};
+use std::borrow::Cow;
+use crate::context::{Path, ReadContext, SubjectId};
 use crate::float::{FloatBinaryOp, FloatExprNode, FloatTrinaryOp, FloatUnaryOp};
 use crate::integer::{IntBinaryOp, IntUnaryOp};
 use crate::integer::{IntExprNode, IntTrinaryOp};
@@ -67,9 +68,9 @@ where
         self.inner.eval(ctx)
     }
 
-    pub fn alias(&self, scope: impl Into<ScopeId>, name: &str) -> Assignment<N, S> {
+    pub fn alias(&self, scope: impl Into<SubjectId>, name: impl Into<Cow<'static, str>>) -> Assignment<N, S> {
         Assignment {
-            path: Path::from_name(scope, name),
+            path: Path::new(scope.into(), name),
             expr: Expr::new(self.inner.clone()),
         }
     }
