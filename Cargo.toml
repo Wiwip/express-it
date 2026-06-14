@@ -12,6 +12,18 @@ smol_str = "0.2.2"
 env_logger = "0.11"
 criterion = "0.8.2"
 
+[features]
+serde = ["dep:serde", "dep:thiserror"]
+
+[dependencies.thiserror]
+version = "2"
+optional = true
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+optional = true
+
 [[bench]]
 name = "float"
 harness = false

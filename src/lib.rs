@@ -24,3 +24,9 @@ pub mod num_cast;
 
 /// Test scaffolding built on top of `MapContext`.
 pub mod test_utils;
+
+pub use context::Path;
+pub use float::FloatExprNode;
+pub use frame::LazyPlan;
+pub use logic::{BoolExpr, CompareExpr};
+pub use test_utils::{MapContext, MapSchema};
