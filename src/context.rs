@@ -6,11 +6,16 @@ use std::hash::Hash;
 
 /// The human-readable path used by your user library to build expressions.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Path(pub SmolStr);
+#[repr(transparent)]
+pub struct Path {
+    inner: SmolStr,
+}
 
 impl Path {
     pub fn new(path: impl Into<SmolStr>) -> Self {
-        Self(path.into())
+        Self {
+            inner: path.into(),
+        }
     }
 
     /// Automatically uses the Rust type name as the root
@@ -23,16 +28,26 @@ impl Path {
         let name = Self::get_short_name::<T>();
 
         let path = format!("{}.{}.{}", prefix, name, suffix);
-        Self(SmolStr::new(path))
+        Self::from_name(path)
     }
 
     /// Creates a new Path from a specific name
     pub fn from_name(name: impl Into<SmolStr>) -> Self {
-        Self(name.into())
+        Self {
+            inner: name.into(),
+        }
     }
 
     pub fn from_segments(segments: &[&str]) -> Self {
-        Self(segments.join(".").into())
+        Self::from_name(segments.join("."))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.inner.as_str()
+    }
+
+    pub fn hash_value(&self) -> u64 {
+        fnv1a64(self.as_str())
     }
 
     fn get_short_name<T>() -> &'static str {
@@ -51,10 +66,6 @@ pub trait WriteContext {
         access: &Path,
         value: Box<dyn Any + Send + Sync>,
     ) -> Result<(), ExpressionError>;
-}
-
-pub trait Fetch {
-    fn fetch(&self, path: &Path) -> Result<Box<dyn Any>, ExpressionError>;
 }
 
 pub const fn fnv1a64(s: &str) -> u64 {

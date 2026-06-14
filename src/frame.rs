@@ -46,8 +46,6 @@ impl<'a, Ctx> CachedEvalContext<'a, Ctx> {
         }
     }
 
-    pub fn write() {}
-
     pub fn into_output(self) -> PlanResults {
         PlanResults {
             shadow: self.shadow,

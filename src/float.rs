@@ -74,7 +74,7 @@ where
             }
             FloatExprNode::Cast(cast) => cast.eval(ctx),
             FloatExprNode::UnaryOp { op, expr } => {
-                let value = expr.inner.eval(ctx)?;
+                let value = expr.eval(ctx)?;
                 op.eval(value)
             }
             FloatExprNode::BinaryOp {
@@ -82,8 +82,8 @@ where
                 op,
                 rhs_expr: rhs,
             } => {
-                let l = lhs.inner.eval(ctx)?;
-                let r = rhs.inner.eval(ctx)?;
+                let l = lhs.eval(ctx)?;
+                let r = rhs.eval(ctx)?;
                 op.eval(l, r)
             }
             FloatExprNode::TrinaryOp {
@@ -92,9 +92,9 @@ where
                 arg1_expr,
                 arg2_expr,
             } => {
-                let value = value_expr.inner.eval(ctx)?;
-                let arg1 = arg1_expr.inner.eval(ctx)?;
-                let arg2 = arg2_expr.inner.eval(ctx)?;
+                let value = value_expr.eval(ctx)?;
+                let arg1 = arg1_expr.eval(ctx)?;
+                let arg2 = arg2_expr.eval(ctx)?;
                 op.eval(value, arg1, arg2)
             }
             FloatExprNode::IfThenElseOp {
@@ -102,16 +102,16 @@ where
                 arg1_expr,
                 arg2_expr,
             } => {
-                let bool_result = bool_expr.inner.eval(ctx)?;
+                let bool_result = bool_expr.eval(ctx)?;
                 if bool_result {
-                    arg1_expr.inner.eval(ctx)
+                    arg1_expr.eval(ctx)
                 } else {
-                    arg2_expr.inner.eval(ctx)
+                    arg2_expr.eval(ctx)
                 }
             }
             FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval(ctx) {
                 Ok(v) => Ok(v),
-                Err(_) => or_expr.inner.eval(ctx),
+                Err(_) => or_expr.eval(ctx),
             },
         }
     }

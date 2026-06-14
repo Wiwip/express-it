@@ -163,11 +163,11 @@ impl<S: ExprSchema> ExprNode<bool, S> for BoolExprNode<S> {
             BoolExprNode::Lit(lit) => Ok(lit.clone()),
             BoolExprNode::Boxed(value) => Ok(value.eval(ctx)?),
             BoolExprNode::UnaryOp { op, expr } => match op {
-                LogicUnaryOp::Not => Ok(!expr.inner.eval(ctx)?),
+                LogicUnaryOp::Not => Ok(!expr.eval(ctx)?),
             },
             BoolExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.inner.eval(ctx)?;
-                let r = rhs.inner.eval(ctx)?;
+                let l = lhs.eval(ctx)?;
+                let r = rhs.eval(ctx)?;
                 match op {
                     LogicBinaryOp::And => Ok(l && r),
                     LogicBinaryOp::Or => Ok(l || r),
