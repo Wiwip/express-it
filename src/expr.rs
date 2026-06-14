@@ -25,79 +25,6 @@ where
     fn get_dependencies(&self, deps: &mut std::collections::HashSet<Path>);
 }
 
-#[doc(hidden)]
-#[macro_export]
-macro_rules! impl_eval_dyn {
-    (
-        $node:ident,
-        $expr_field:ident,
-        $rhs_expr_field:ident,
-        $arg1_expr_field:ident,
-        $arg2_expr_field:ident,
-        $bool_expr_field:ident,
-        $lhs_expr_field:ident,
-    ) => {
-        fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
-            match self {
-                $node::Lit(lit) => Ok(*lit),
-                $node::Attribute(key) => {
-                    let value = ctx.get_any(key)?;
-
-                    if let Some(val) = value.downcast_ref::<N>() {
-                        Ok(*val)
-                    } else {
-                        Err(ExpressionError::InvalidTypes)
-                    }
-                }
-                $node::Cast(cast) => cast.eval_dyn(ctx),
-                $node::UnaryOp { op, $expr_field: expr } => {
-                    let value = expr.eval_dyn(ctx)?;
-                    op.eval(value)
-                }
-                $node::BinaryOp {
-                    $lhs_expr_field: lhs,
-                    op,
-                    $rhs_expr_field: rhs,
-                } => {
-                    let l = lhs.eval_dyn(ctx)?;
-                    let r = rhs.eval_dyn(ctx)?;
-                    op.eval(l, r)
-                }
-                $node::TrinaryOp {
-                    value_expr,
-                    op,
-                    $arg1_expr_field: arg1,
-                    $arg2_expr_field: arg2,
-                } => {
-                    let value = value_expr.eval_dyn(ctx)?;
-                    let arg1 = arg1.eval_dyn(ctx)?;
-                    let arg2 = arg2.eval_dyn(ctx)?;
-                    op.eval(value, arg1, arg2)
-                }
-                $node::IfThenElseOp {
-                    $bool_expr_field: bool_expr,
-                    $arg1_expr_field: arg1_expr,
-                    $arg2_expr_field: arg2_expr,
-                } => {
-                    let bool_result = bool_expr.eval_dyn(ctx)?;
-                    if bool_result {
-                        arg1_expr.eval_dyn(ctx)
-                    } else {
-                        arg2_expr.eval_dyn(ctx)
-                    }
-                }
-                $node::ErrorHandlingOp {
-                    $expr_field: expr,
-                    $or_expr_field: or_expr,
-                } => match expr.eval_dyn(ctx) {
-                    Ok(v) => Ok(v),
-                    Err(_) => or_expr.eval_dyn(ctx),
-                },
-            }
-        }
-    };
-}
-
 pub trait IfThenNode<N, S>: ExprNode<N, S> + Sized
 where
     N: SelectExprNodeImpl<S>,
@@ -515,18 +442,6 @@ macro_rules! impl_trinary_ops {
 
 impl_trinary_ops!(IntExprNode, TrinaryOp, IntTrinaryOp: i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
 impl_trinary_ops!(FloatExprNode, TrinaryOp, FloatTrinaryOp:  f32, f64);
-
-pub trait AttributeNodeProvider<S: ExprSchema> {
-    fn new_attribute(path: Path) -> Self;
-}
-
-impl<N: SelectExprNodeImpl<S, Property = N>, S: ExprSchema> AttributeNodeProvider<S> for IntExprNode<N, S> {
-    fn new_attribute(path: Path) -> Self { Self::Attribute(path) }
-}
-
-impl<N: SelectExprNodeImpl<S, Property = N>, S: ExprSchema> AttributeNodeProvider<S> for FloatExprNode<N, S> {
-    fn new_attribute(path: Path) -> Self { Self::Attribute(path) }
-}
 
 #[cfg(test)]
 mod tests {

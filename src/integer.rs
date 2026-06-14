@@ -1,233 +1,14 @@
-use crate::context::{Path, ReadContext};
-use crate::expr::{Expr, ExprNode, ExprSchema, ExpressionError, IfThenNode, SelectExprNodeImpl};
-use crate::logic::BoolExpr;
-use crate::num_cast::CastFrom;
+use crate::expr::ExpressionError;
+use crate::numeric::{BinaryOpEval, NumExprKind, NumericExprNode, TrinaryOpEval, UnaryOpEval};
 use num_traits::{CheckedNeg, PrimInt};
-use std::collections::HashSet;
 
-pub enum IntExprNode<N: SelectExprNodeImpl<S>, S: ExprSchema> {
-    Lit(N),
-    Attribute(Path),
-    Cast(Box<dyn ExprNode<N, S>>),
-    UnaryOp {
-        op: IntUnaryOp,
-        expr: Expr<N, S>,
-    },
-    BinaryOp {
-        lhs_expr: Expr<N, S>,
-        op: IntBinaryOp,
-        rhs_expr: Expr<N, S>,
-    },
-    TrinaryOp {
-        value_expr: Expr<N, S>,
-        op: IntTrinaryOp,
-        arg1_expr: Expr<N, S>,
-        arg2_expr: Expr<N, S>,
-    },
-    IfThenElseOp {
-        bool_expr: BoolExpr<S>,
-        arg1_expr: Expr<N, S>,
-        arg2_expr: Expr<N, S>,
-    },
-    ErrorHandlingOp {
-        expr: Expr<N, S>,
-        or_expr: Expr<N, S>,
-    },
-}
+pub type IntExprNode<N, S> = NumericExprNode<N, S, IntKind>;
 
-impl<N, S> ExprNode<N, S> for IntExprNode<N, S>
-where
-    N: PrimInt + CheckedNeg + SelectExprNodeImpl<S, Property = N> + Send + Sync + 'static,
-    S: ExprSchema,
-{
-    fn eval<'w, 's>(&self, ctx: &S::Context<'w, 's>) -> Result<N, ExpressionError> {
-        match self {
-            IntExprNode::Lit(lit) => Ok(*lit),
-            IntExprNode::Attribute(key) => {
-                let value = ctx.get_any(key)?;
-
-                if let Some(val) = value.downcast_ref::<N>() {
-                    Ok(*val)
-                } else {
-                    Err(ExpressionError::InvalidTypes)
-                }
-            }
-            IntExprNode::Cast(cast) => cast.eval(ctx),
-            IntExprNode::UnaryOp { op, expr } => match op {
-                IntUnaryOp::Neg => expr
-                    .eval(ctx)?
-                    .checked_neg()
-                    .ok_or(ExpressionError::InvalidOperationNeg),
-            },
-            IntExprNode::BinaryOp {
-                lhs_expr,
-                op,
-                rhs_expr,
-            } => {
-                let lhs = lhs_expr.eval(ctx)?;
-                let rhs = rhs_expr.eval(ctx)?;
-                op.eval(lhs, rhs)
-            }
-            IntExprNode::TrinaryOp {
-                value_expr,
-                op,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let value = value_expr.eval(ctx)?;
-                let arg1 = arg1_expr.eval(ctx)?;
-                let arg2 = arg2_expr.eval(ctx)?;
-                op.eval(value, arg1, arg2)
-            }
-            IntExprNode::IfThenElseOp {
-                bool_expr,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let bool_result = bool_expr.eval(ctx)?;
-                if bool_result {
-                    arg1_expr.eval(ctx)
-                } else {
-                    arg2_expr.eval(ctx)
-                }
-            }
-            IntExprNode::ErrorHandlingOp { expr, or_expr } => match expr.eval(ctx) {
-                Ok(v) => Ok(v),
-                Err(_) => or_expr.eval(ctx),
-            },
-        }
-    }
-
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
-        match self {
-            IntExprNode::Lit(lit) => Ok(*lit),
-            IntExprNode::Attribute(key) => {
-                let value = ctx.get_any(key)?;
-
-                if let Some(val) = value.downcast_ref::<N>() {
-                    Ok(*val)
-                } else {
-                    Err(ExpressionError::InvalidTypes)
-                }
-            }
-            IntExprNode::Cast(cast) => cast.eval_dyn(ctx),
-            IntExprNode::UnaryOp { op, expr } => match op {
-                IntUnaryOp::Neg => expr
-                    .inner.eval_dyn(ctx)?
-                    .checked_neg()
-                    .ok_or(ExpressionError::InvalidOperationNeg),
-            },
-            IntExprNode::BinaryOp {
-                lhs_expr,
-                op,
-                rhs_expr,
-            } => {
-                let lhs = lhs_expr.inner.eval_dyn(ctx)?;
-                let rhs = rhs_expr.inner.eval_dyn(ctx)?;
-                op.eval(lhs, rhs)
-            }
-            IntExprNode::TrinaryOp {
-                value_expr,
-                op,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let value = value_expr.inner.eval_dyn(ctx)?;
-                let arg1 = arg1_expr.inner.eval_dyn(ctx)?;
-                let arg2 = arg2_expr.inner.eval_dyn(ctx)?;
-                op.eval(value, arg1, arg2)
-            }
-            IntExprNode::IfThenElseOp {
-                bool_expr,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let bool_result = bool_expr.inner.eval_dyn(ctx)?;
-                if bool_result {
-                    arg1_expr.inner.eval_dyn(ctx)
-                } else {
-                    arg2_expr.inner.eval_dyn(ctx)
-                }
-            }
-            IntExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval_dyn(ctx) {
-                Ok(v) => Ok(v),
-                Err(_) => or_expr.inner.eval_dyn(ctx),
-            },
-        }
-    }
-
-    fn get_dependencies(&self, deps: &mut HashSet<Path>) {
-        match self {
-            IntExprNode::Lit(_) => {}
-            IntExprNode::Attribute(path) => {
-                deps.insert(path.clone());
-            }
-            IntExprNode::Cast(cast) => {
-                cast.get_dependencies(deps);
-            }
-            IntExprNode::UnaryOp { expr, .. } => {
-                expr.inner.get_dependencies(deps);
-            }
-            IntExprNode::BinaryOp {
-                lhs_expr, rhs_expr, ..
-            } => {
-                lhs_expr.inner.get_dependencies(deps);
-                rhs_expr.inner.get_dependencies(deps);
-            }
-            IntExprNode::TrinaryOp {
-                value_expr,
-                arg1_expr,
-                arg2_expr,
-                ..
-            } => {
-                value_expr.inner.get_dependencies(deps);
-                arg1_expr.inner.get_dependencies(deps);
-                arg2_expr.inner.get_dependencies(deps);
-            }
-            IntExprNode::IfThenElseOp {
-                bool_expr,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                bool_expr.inner.get_dependencies(deps);
-                arg1_expr.inner.get_dependencies(deps);
-                arg2_expr.inner.get_dependencies(deps);
-            }
-            IntExprNode::ErrorHandlingOp { expr, or_expr } => {
-                expr.inner.get_dependencies(deps);
-                or_expr.inner.get_dependencies(deps);
-            }
-        }
-    }
-}
-
-impl<N, S> IfThenNode<N, S> for IntExprNode<N, S>
-where
-    N: PrimInt
-        + CheckedNeg
-        + SelectExprNodeImpl<S, Property = N, Node = IntExprNode<N, S>>
-        + Send
-        + Sync
-        + 'static,
-    S: ExprSchema,
-{
-    fn if_then(bool_expr: BoolExpr<S>, t: Expr<N, S>, f: Expr<N, S>) -> Self {
-        IntExprNode::IfThenElseOp {
-            bool_expr,
-            arg1_expr: t.into(),
-            arg2_expr: f.into(),
-        }
-    }
-}
-
-impl<N, S> CastFrom<N, S> for IntExprNode<N, S>
-where
-    N: SelectExprNodeImpl<S, Property = N, Node = IntExprNode<N, S>>,
-    S: ExprSchema,
-{
-    fn cast_from(node: Box<dyn ExprNode<N, S>>) -> Self {
-        IntExprNode::Cast(node)
-    }
+pub struct IntKind;
+impl<N: PrimInt + CheckedNeg + Send + Sync + 'static> NumExprKind<N> for IntKind {
+    type UnaryOp = IntUnaryOp;
+    type BinaryOp = IntBinaryOp;
+    type TrinaryOp = IntTrinaryOp;
 }
 
 #[macro_export]
@@ -263,6 +44,16 @@ pub enum IntUnaryOp {
     Neg,
 }
 
+impl<N: PrimInt + CheckedNeg> UnaryOpEval<N> for IntUnaryOp {
+    fn eval(&self, value: N) -> Result<N, ExpressionError> {
+        match self {
+            IntUnaryOp::Neg => value
+                .checked_neg()
+                .ok_or(ExpressionError::InvalidOperationNeg),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum IntBinaryOp {
     Add,
@@ -275,8 +66,8 @@ pub enum IntBinaryOp {
     Max,
 }
 
-impl IntBinaryOp {
-    fn eval<N: PrimInt + CheckedNeg>(&self, l: N, r: N) -> Result<N, ExpressionError> {
+impl<N: PrimInt + CheckedNeg> BinaryOpEval<N> for IntBinaryOp {
+    fn eval(&self, l: N, r: N) -> Result<N, ExpressionError> {
         let result = match self {
             IntBinaryOp::Add => l + r,
             IntBinaryOp::Sub => l - r,
@@ -296,13 +87,8 @@ pub enum IntTrinaryOp {
     Clamp,
 }
 
-impl IntTrinaryOp {
-    fn eval<N: PrimInt + CheckedNeg>(
-        &self,
-        val: N,
-        arg1: N,
-        arg2: N,
-    ) -> Result<N, ExpressionError> {
+impl<N: PrimInt + CheckedNeg> TrinaryOpEval<N> for IntTrinaryOp {
+    fn eval(&self, val: N, arg1: N, arg2: N) -> Result<N, ExpressionError> {
         let result = match self {
             IntTrinaryOp::Clamp => val.clamp(arg1, arg2),
         };

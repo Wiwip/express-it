@@ -1,248 +1,16 @@
-use crate::context::{Path, ReadContext};
-use crate::expr::{Expr, ExprNode, ExprSchema, ExpressionError, IfThenNode, SelectExprNodeImpl};
+use crate::expr::{Expr, ExprSchema, ExpressionError, SelectExprNodeImpl};
 use crate::logic::BoolExpr;
-use crate::num_cast::CastFrom;
+use crate::numeric::{BinaryOpEval, NumExprKind, NumericExprNode, TrinaryOpEval, UnaryOpEval};
 use num_traits::Float;
-use std::collections::HashSet;
 use std::fmt::Debug;
-use std::sync::Arc;
 
-pub enum FloatExprNode<N: SelectExprNodeImpl<S, Property = N>, S: ExprSchema> {
-    Lit(N),
-    Attribute(Path),
-    Cast(Box<dyn ExprNode<N, S>>),
-    UnaryOp {
-        op: FloatUnaryOp,
-        expr: Expr<N, S>,
-    },
-    BinaryOp {
-        lhs_expr: Expr<N, S>,
-        op: FloatBinaryOp,
-        rhs_expr: Expr<N, S>,
-    },
-    TrinaryOp {
-        value_expr: Expr<N, S>,
-        op: FloatTrinaryOp,
-        arg1_expr: Expr<N, S>,
-        arg2_expr: Expr<N, S>,
-    },
-    IfThenElseOp {
-        bool_expr: BoolExpr<S>,
-        arg1_expr: Expr<N, S>,
-        arg2_expr: Expr<N, S>,
-    },
-    ErrorHandlingOp {
-        expr: Expr<N, S>,
-        or_expr: Expr<N, S>,
-    },
-}
+pub type FloatExprNode<N, S> = NumericExprNode<N, S, FloatKind>;
 
-impl<N, S> Into<Expr<N, S>> for FloatExprNode<N, S>
-where
-    N: Float
-        + SelectExprNodeImpl<S, Property = N, Node = FloatExprNode<N, S>>
-        + Send
-        + Sync
-        + 'static,
-    S: ExprSchema,
-{
-    fn into(self) -> Expr<N, S> {
-        Expr::new(Arc::new(self))
-    }
-}
-
-impl<N, S> ExprNode<N, S> for FloatExprNode<N, S>
-where
-    N: Float
-        + SelectExprNodeImpl<S, Property = N, Node = FloatExprNode<N, S>>
-        + Send
-        + Sync
-        + 'static,
-    S: ExprSchema,
-{
-    fn eval<'w, 's>(&self, ctx: &S::Context<'w, 's>) -> Result<N, ExpressionError> {
-        match self {
-            FloatExprNode::Lit(lit) => Ok(*lit),
-            FloatExprNode::Attribute(key) => {
-                let value = ctx.get_any(key)?;
-
-                if let Some(val) = value.downcast_ref::<N>() {
-                    Ok(*val)
-                } else {
-                    Err(ExpressionError::InvalidTypes)
-                }
-            }
-            FloatExprNode::Cast(cast) => cast.eval(ctx),
-            FloatExprNode::UnaryOp { op, expr } => {
-                let value = expr.eval(ctx)?;
-                op.eval(value)
-            }
-            FloatExprNode::BinaryOp {
-                lhs_expr: lhs,
-                op,
-                rhs_expr: rhs,
-            } => {
-                let l = lhs.eval(ctx)?;
-                let r = rhs.eval(ctx)?;
-                op.eval(l, r)
-            }
-            FloatExprNode::TrinaryOp {
-                value_expr,
-                op,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let value = value_expr.eval(ctx)?;
-                let arg1 = arg1_expr.eval(ctx)?;
-                let arg2 = arg2_expr.eval(ctx)?;
-                op.eval(value, arg1, arg2)
-            }
-            FloatExprNode::IfThenElseOp {
-                bool_expr,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let bool_result = bool_expr.eval(ctx)?;
-                if bool_result {
-                    arg1_expr.eval(ctx)
-                } else {
-                    arg2_expr.eval(ctx)
-                }
-            }
-            FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval(ctx) {
-                Ok(v) => Ok(v),
-                Err(_) => or_expr.eval(ctx),
-            },
-        }
-    }
-
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<N, ExpressionError> {
-        match self {
-            FloatExprNode::Lit(lit) => Ok(*lit),
-            FloatExprNode::Attribute(key) => {
-                let value = ctx.get_any(key)?;
-
-                if let Some(val) = value.downcast_ref::<N>() {
-                    Ok(*val)
-                } else {
-                    Err(ExpressionError::InvalidTypes)
-                }
-            }
-            FloatExprNode::Cast(cast) => cast.eval_dyn(ctx),
-            FloatExprNode::UnaryOp { op, expr } => {
-                let value = expr.inner.eval_dyn(ctx)?;
-                op.eval(value)
-            }
-            FloatExprNode::BinaryOp {
-                lhs_expr: lhs,
-                op,
-                rhs_expr: rhs,
-            } => {
-                let l = lhs.inner.eval_dyn(ctx)?;
-                let r = rhs.inner.eval_dyn(ctx)?;
-                op.eval(l, r)
-            }
-            FloatExprNode::TrinaryOp {
-                value_expr,
-                op,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let value = value_expr.inner.eval_dyn(ctx)?;
-                let arg1 = arg1_expr.inner.eval_dyn(ctx)?;
-                let arg2 = arg2_expr.inner.eval_dyn(ctx)?;
-                op.eval(value, arg1, arg2)
-            }
-            FloatExprNode::IfThenElseOp {
-                bool_expr,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                let bool_result = bool_expr.inner.eval_dyn(ctx)?;
-                if bool_result {
-                    arg1_expr.inner.eval_dyn(ctx)
-                } else {
-                    arg2_expr.inner.eval_dyn(ctx)
-                }
-            }
-            FloatExprNode::ErrorHandlingOp { expr, or_expr } => match expr.inner.eval_dyn(ctx) {
-                Ok(v) => Ok(v),
-                Err(_) => or_expr.inner.eval_dyn(ctx),
-            },
-        }
-    }
-
-    fn get_dependencies(&self, deps: &mut HashSet<Path>) {
-        match self {
-            FloatExprNode::Lit(_) => {}
-            FloatExprNode::Attribute(path) => {
-                deps.insert(path.clone());
-            }
-            FloatExprNode::Cast(cast) => {
-                cast.get_dependencies(deps);
-            }
-            FloatExprNode::UnaryOp { expr, .. } => {
-                expr.inner.get_dependencies(deps);
-            }
-            FloatExprNode::BinaryOp {
-                lhs_expr, rhs_expr, ..
-            } => {
-                lhs_expr.inner.get_dependencies(deps);
-                rhs_expr.inner.get_dependencies(deps);
-            }
-            FloatExprNode::TrinaryOp {
-                value_expr,
-                arg1_expr,
-                arg2_expr,
-                ..
-            } => {
-                value_expr.inner.get_dependencies(deps);
-                arg1_expr.inner.get_dependencies(deps);
-                arg2_expr.inner.get_dependencies(deps);
-            }
-            FloatExprNode::IfThenElseOp {
-                bool_expr,
-                arg1_expr,
-                arg2_expr,
-            } => {
-                bool_expr.inner.get_dependencies(deps);
-                arg1_expr.inner.get_dependencies(deps);
-                arg2_expr.inner.get_dependencies(deps);
-            }
-            FloatExprNode::ErrorHandlingOp { expr, or_expr } => {
-                expr.inner.get_dependencies(deps);
-                or_expr.inner.get_dependencies(deps);
-            }
-        }
-    }
-}
-
-impl<N, S> IfThenNode<N, S> for FloatExprNode<N, S>
-where
-    N: Float
-        + SelectExprNodeImpl<S, Property = N, Node = FloatExprNode<N, S>>
-        + Send
-        + Sync
-        + 'static,
-    S: ExprSchema,
-{
-    fn if_then(bool_expr: BoolExpr<S>, t: Expr<N, S>, f: Expr<N, S>) -> Self {
-        FloatExprNode::IfThenElseOp {
-            bool_expr,
-            arg1_expr: t.into(),
-            arg2_expr: f.into(),
-        }
-    }
-}
-
-impl<N, S> CastFrom<N, S> for FloatExprNode<N, S>
-where
-    N: SelectExprNodeImpl<S, Property = N, Node = FloatExprNode<N, S>>,
-    S: ExprSchema,
-{
-    fn cast_from(node: Box<dyn ExprNode<N, S>>) -> Self {
-        FloatExprNode::Cast(node)
-    }
+pub struct FloatKind;
+impl<N: Float + Send + Sync + 'static> NumExprKind<N> for FloatKind {
+    type UnaryOp = FloatUnaryOp;
+    type BinaryOp = FloatBinaryOp;
+    type TrinaryOp = FloatTrinaryOp;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -271,8 +39,8 @@ pub enum FloatUnaryOp {
     Cbrt,
 }
 
-impl FloatUnaryOp {
-    fn eval<N: Float>(&self, value: N) -> Result<N, ExpressionError> {
+impl<N: Float> UnaryOpEval<N> for FloatUnaryOp {
+    fn eval(&self, value: N) -> Result<N, ExpressionError> {
         let result = match self {
             FloatUnaryOp::Sin => value.sin(),
             FloatUnaryOp::Asin => value.asin(),
@@ -307,8 +75,8 @@ pub enum FloatBinaryOp {
     Max,
 }
 
-impl FloatBinaryOp {
-    fn eval<N: Float>(&self, l: N, r: N) -> Result<N, ExpressionError> {
+impl<N: Float> BinaryOpEval<N> for FloatBinaryOp {
+    fn eval(&self, l: N, r: N) -> Result<N, ExpressionError> {
         let result = match self {
             FloatBinaryOp::Add => l + r,
             FloatBinaryOp::Sub => l - r,
@@ -328,8 +96,8 @@ pub enum FloatTrinaryOp {
     Clamp,
 }
 
-impl FloatTrinaryOp {
-    fn eval<N: Float>(&self, val: N, arg1: N, arg2: N) -> Result<N, ExpressionError> {
+impl<N: Float> TrinaryOpEval<N> for FloatTrinaryOp {
+    fn eval(&self, val: N, arg1: N, arg2: N) -> Result<N, ExpressionError> {
         let result = match self {
             FloatTrinaryOp::Clamp => val.clamp(arg1, arg2),
         };
