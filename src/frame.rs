@@ -61,10 +61,7 @@ impl<Ctx: ReadContext> ReadContext for CachedEvalContext<'_, Ctx> {
             trace!("Cache hit for path: {:?}", path);
             Ok(value.as_ref())
         } else {
-            trace!(
-                "Cache miss for path: {:?}, fetching from source",
-                path
-            );
+            trace!("Cache miss for path: {:?}, fetching from source", path);
             self.read_ctx.get_any(path)
         }
     }
@@ -229,7 +226,8 @@ mod tests {
 
         lp.commit(&mut ctx).expect("Failed to commit");
 
-        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST, "val"));
+        let expr =
+            FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST, "val"));
         let expr_result = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }
@@ -258,7 +256,8 @@ mod tests {
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 8.0);
 
-        let expr = FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST, "val"));
+        let expr =
+            FloatExprNode::<f32, MapSchema>::Attribute(Path::from_type_name::<Hp>(DST, "val"));
         let expr_result: f32 = expr.eval(&ctx).unwrap();
         assert_eq!(expr_result, 12.0);
     }

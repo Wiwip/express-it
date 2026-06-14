@@ -4,39 +4,12 @@ use num_traits::{CheckedNeg, PrimInt};
 
 pub type IntExprNode<N, S> = NumericExprNode<N, S, IntKind>;
 
+/// Selector that makes integer expressions use checked arithmetic operators.
 pub struct IntKind;
 impl<N: PrimInt + CheckedNeg + Send + Sync + 'static> NumExprKind<N> for IntKind {
     type UnaryOp = IntUnaryOp;
     type BinaryOp = IntBinaryOp;
     type TrinaryOp = IntTrinaryOp;
-}
-
-#[macro_export]
-macro_rules! impl_std_binary_ops {
-    (
-        $target:ident,
-        $node_variant:ident,
-        $op_enum:ident,
-        [$($trait:ident => ($method:ident, $variant:ident)),* $(,)?]
-    ) => {
-        $(
-            impl<N> std::ops::$trait for Expr<N>
-            where
-                N: BinaryExprOps + SelectExprNodeImpl<Property = N, Node = $target<N>> + Send + Sync,
-                $target<N>: crate::expr::ExprNode<N>,
-            {
-                type Output = Self;
-
-                fn $method(self, rhs_expr: Self) -> Self::Output {
-                    Expr::new(std::sync::Arc::new($target::$node_variant {
-                        lhs_expr: self,
-                        op: $op_enum::$variant,
-                        rhs_expr,
-                    }))
-                }
-            }
-        )*
-    };
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -1,9 +1,12 @@
 use crate::context::{Path, ReadContext};
-use crate::expr::{Expr, ExprNode, ExprSchema, ExpressionError, IfThenNode, SelectExprNode, SelectExprNodeImpl};
+use crate::expr::{
+    Expr, ExprNode, ExprSchema, ExpressionError, IfThenNode, SelectExprNode, SelectExprNodeImpl,
+};
 use num_traits::Num;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+/// Comparison helpers on any numeric expression.
 pub trait CompareExpr<S: ExprSchema>: Sized {
     fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr<S>;
 
@@ -29,6 +32,7 @@ pub trait CompareExpr<S: ExprSchema>: Sized {
 
 pub type BoolExpr<S> = Expr<bool, S>;
 
+/// Boolean expression wrapper with constant/logic helpers.
 impl<S: ExprSchema> BoolExpr<S> {
     pub fn true_() -> BoolExpr<S> {
         let node = BoolExprNode::Lit(true);
@@ -49,12 +53,11 @@ impl<S: ExprSchema> BoolExpr<S> {
         N: Num + SelectExprNodeImpl<S, Property = N> + Send + Sync,
         SelectExprNode<N, S>: IfThenNode<N, S>,
     {
-        // Convert once (avoid move errors from multiple `.into()` calls)
         let bool_expr = self;
         let t: Expr<N, S> = if_true_expr.into();
         let f: Expr<N, S> = if_false_expr.into();
 
-        // Build the correct node type (int or float) via the trait, not via FloatExprNode directly
+        // Build the correct node type (int or float) via the trait, not via the ExprNode directly
         let node = <SelectExprNode<N, S> as IfThenNode<N, S>>::if_then(bool_expr, t, f);
 
         Expr::<N, S>::new(Arc::new(node))
@@ -82,13 +85,21 @@ impl<S: ExprSchema> BoolExpr<S> {
     pub fn xnor(self, other: BoolExpr<S>) -> BoolExpr<S> {
         !(self ^ other)
     }
+}
 
-    pub fn any(self) {
-        unimplemented!()
+/// Adds `all()` and `any()` to slices of `BoolExpr`.
+pub trait BoolExprExt<S: ExprSchema> {
+    fn all(&self) -> BoolExpr<S>;
+    fn any(&self) -> BoolExpr<S>;
+}
+
+impl<S: ExprSchema> BoolExprExt<S> for [BoolExpr<S>] {
+    fn all(&self) -> BoolExpr<S> {
+        self.iter().cloned().fold(BoolExpr::true_(), |a, b| a & b)
     }
 
-    pub fn all() {
-        unimplemented!()
+    fn any(&self) -> BoolExpr<S> {
+        self.iter().cloned().fold(BoolExpr::false_(), |a, b| a | b)
     }
 }
 
@@ -158,7 +169,7 @@ pub enum BoolExprNode<S: ExprSchema> {
 }
 
 impl<S: ExprSchema> ExprNode<bool, S> for BoolExprNode<S> {
-    fn eval<'w ,'s>(&self, ctx: &S::Context<'w, 's>) -> Result<bool, ExpressionError> {
+    fn eval<'w, 's>(&self, ctx: &S::Context<'w, 's>) -> Result<bool, ExpressionError> {
         match self {
             BoolExprNode::Lit(lit) => Ok(lit.clone()),
             BoolExprNode::Boxed(value) => Ok(value.eval(ctx)?),
@@ -215,12 +226,12 @@ impl<S: ExprSchema> ExprNode<bool, S> for BoolExprNode<S> {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ComparisonOp {
-    Eq, // Equal
-    Ne, // Not Equal
-    Gt, // Greater Than
-    Ge, // Greater or Equal Than
-    Lt, // Less Than
-    Le, // Less or Equal Than
+    Eq, // equal
+    Ne, // not equal
+    Gt, // greater than
+    Ge, // greater or equal
+    Lt, // less than
+    Le, // less or equal
 }
 
 impl ComparisonOp {
@@ -301,7 +312,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::logic::{BoolExpr, CompareExpr};
+    use crate::logic::{BoolExpr, BoolExprExt, CompareExpr};
     use crate::test_utils::scopes::{DST, SRC};
     use crate::test_utils::{Atk, Hp, IntDef, IntHp, MapContext, MapSchema};
 
@@ -547,6 +558,48 @@ mod tests {
 
         for (a, b, expected) in cases {
             let result = a.xnor(b).eval(&ctx).unwrap();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_all() {
+        let ctx = MapContext::default();
+        let t = BoolExpr::<MapSchema>::true_();
+        let f = BoolExpr::false_();
+
+        let cases = [
+            (vec![], true),
+            (vec![f.clone()], false),
+            (vec![f.clone(), f.clone()], false),
+            (vec![t.clone(), f.clone()], false),
+            (vec![f.clone(), t.clone()], false),
+            (vec![t.clone(), t.clone()], true),
+        ];
+
+        for (exprs, expected) in cases {
+            let result = exprs.all().eval(&ctx).unwrap();
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_any() {
+        let ctx = MapContext::default();
+        let t = BoolExpr::<MapSchema>::true_();
+        let f = BoolExpr::false_();
+
+        let cases = [
+            (vec![], false),
+            (vec![f.clone()], false),
+            (vec![f.clone(), f.clone()], false),
+            (vec![t.clone(), f.clone()], true),
+            (vec![f.clone(), t.clone()], true),
+            (vec![t.clone(), t.clone()], true),
+        ];
+
+        for (exprs, expected) in cases {
+            let result = exprs.any().eval(&ctx).unwrap();
             assert_eq!(result, expected);
         }
     }

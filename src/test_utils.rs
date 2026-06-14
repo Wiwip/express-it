@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+/// Attribute helpers and test doubles around `MapContext`.
 pub mod scopes {
     use smol_str::SmolStr;
 
@@ -72,8 +73,7 @@ impl Atk {
         &self,
         subject: impl Into<SmolStr>,
         expr: Expr<<Atk as ExprAttribute>::Property, MapSchema>,
-    ) -> Assignment<<Atk as ExprAttribute>::Property, MapSchema>
-    {
+    ) -> Assignment<<Atk as ExprAttribute>::Property, MapSchema> {
         let path = Path::from_type_name::<Self>(subject.into(), "val");
         Assignment { path, expr }
     }
@@ -90,7 +90,10 @@ pub struct Def;
 
 impl Def {
     #[allow(unused)]
-    pub fn set(subject: impl Into<SmolStr>, expr: Expr<f32, MapSchema>) -> Assignment<f32, MapSchema> {
+    pub fn set(
+        subject: impl Into<SmolStr>,
+        expr: Expr<f32, MapSchema>,
+    ) -> Assignment<f32, MapSchema> {
         let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }
@@ -107,7 +110,10 @@ pub struct Hp;
 
 impl Hp {
     #[allow(unused)]
-    pub fn set(subject: impl Into<SmolStr>, expr: Expr<f32, MapSchema>) -> Assignment<f32, MapSchema> {
+    pub fn set(
+        subject: impl Into<SmolStr>,
+        expr: Expr<f32, MapSchema>,
+    ) -> Assignment<f32, MapSchema> {
         let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }
@@ -124,7 +130,10 @@ pub struct IntAtk;
 
 impl IntAtk {
     #[allow(unused)]
-    pub fn set(subject: impl Into<SmolStr>, expr: Expr<u32, MapSchema>) -> Assignment<u32, MapSchema> {
+    pub fn set(
+        subject: impl Into<SmolStr>,
+        expr: Expr<u32, MapSchema>,
+    ) -> Assignment<u32, MapSchema> {
         let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }
@@ -141,7 +150,10 @@ pub struct IntDef;
 
 impl IntDef {
     #[allow(unused)]
-    pub fn set(subject: impl Into<SmolStr>, expr: Expr<i32, MapSchema>) -> Assignment<i32, MapSchema> {
+    pub fn set(
+        subject: impl Into<SmolStr>,
+        expr: Expr<i32, MapSchema>,
+    ) -> Assignment<i32, MapSchema> {
         let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }
@@ -158,7 +170,10 @@ pub struct IntHp;
 
 impl IntHp {
     #[allow(unused)]
-    pub fn set(subject: impl Into<SmolStr>, expr: Expr<u32, MapSchema>) -> Assignment<u32, MapSchema> {
+    pub fn set(
+        subject: impl Into<SmolStr>,
+        expr: Expr<u32, MapSchema>,
+    ) -> Assignment<u32, MapSchema> {
         let path = Path::from_type_name::<Self>(subject, "val");
         Assignment { path, expr }
     }

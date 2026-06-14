@@ -6,6 +6,7 @@ use std::fmt::Debug;
 
 pub type FloatExprNode<N, S> = NumericExprNode<N, S, FloatKind>;
 
+/// Selector helpers for math functions on the float expression type.
 pub struct FloatKind;
 impl<N: Float + Send + Sync + 'static> NumExprKind<N> for FloatKind {
     type UnaryOp = FloatUnaryOp;

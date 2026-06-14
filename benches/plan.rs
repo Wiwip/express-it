@@ -1,8 +1,8 @@
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use express_it::frame::LazyPlan;
-use express_it::test_utils::{scopes, Atk, Def, Hp, MapContext};
+use express_it::test_utils::{Atk, Def, Hp, MapContext, scopes};
 
 fn bench_dependency(c: &mut Criterion) {
     let expr = (Hp::get(scopes::SRC) - Atk::get(scopes::DST)).max(0.0);
@@ -32,9 +32,7 @@ fn bench_plan_commit(c: &mut Criterion) {
             Hp::get(scopes::SRC) - Hp::get(scopes::DST),
         ));
 
-    c.bench_function("plan_commit", |b| {
-        b.iter(|| plan.commit(&mut ctx).unwrap())
-    });
+    c.bench_function("plan_commit", |b| b.iter(|| plan.commit(&mut ctx).unwrap()));
 }
 
 criterion_group!(plan_benches, bench_dependency, bench_plan_commit);

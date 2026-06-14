@@ -2,15 +2,21 @@ use std::any::Any;
 use std::hint::black_box;
 use std::sync::Arc;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use express_it::context::ReadContext;
 use express_it::float::{FloatBinaryOp, FloatExprNode, FloatUnaryOp};
-use express_it::{context::Path, expr::{Expr, ExpressionError, ExprSchema}};
+use express_it::{
+    context::Path,
+    expr::{Expr, ExprSchema, ExpressionError},
+};
 
 struct BenchSchema;
 impl ExprSchema for BenchSchema {
-    type Context<'w, 's> = BenchContext where 's: 'w;
+    type Context<'w, 's>
+        = BenchContext
+    where
+        's: 'w;
 }
 
 #[derive(Default)]
@@ -62,9 +68,7 @@ fn bench_float_binary_add(c: &mut Criterion) {
         def: Some(Box::new(3.0)),
     };
 
-    group.bench_function("add", |b| {
-        b.iter(|| black_box(expr.eval(&ctx)).unwrap())
-    });
+    group.bench_function("add", |b| b.iter(|| black_box(expr.eval(&ctx)).unwrap()));
 
     group.finish();
 }
@@ -75,9 +79,7 @@ fn bench_float_add_pure(c: &mut Criterion) {
     let mut group = c.benchmark_group("float_add_pure");
     group.measurement_time(std::time::Duration::from_secs(10));
 
-    group.bench_function("add", |b| {
-        b.iter(|| black_box(10.0_f32 + 3.0_f32))
-    });
+    group.bench_function("add", |b| b.iter(|| black_box(10.0_f32 + 3.0_f32)));
 
     group.finish();
 }
@@ -123,13 +125,9 @@ fn bench_float_unary(c: &mut Criterion) {
     ];
 
     for (name, (expr, ctx)) in cases {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(name),
-            &(),
-            |b, _| {
-                b.iter(|| black_box(expr.eval(&ctx)).unwrap())
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(name), &(), |b, _| {
+            b.iter(|| black_box(expr.eval(&ctx)).unwrap())
+        });
     }
 
     group.finish();

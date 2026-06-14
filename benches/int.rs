@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use express_it::test_utils::{scopes, IntHp, MapContext};
+use criterion::{Criterion, criterion_group, criterion_main};
+use express_it::test_utils::{IntHp, MapContext, scopes};
 use std::hint::black_box;
 
 fn bench_int_attribute(c: &mut Criterion) {

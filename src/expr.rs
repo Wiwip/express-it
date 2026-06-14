@@ -12,10 +12,12 @@ use std::fmt::Debug;
 use std::ops::Neg;
 use std::sync::Arc;
 
+/// Trait bound tying a schema to the context type it uses.
 pub trait ExprSchema: Send + Sync + 'static {
     type Context<'w, 's: 'w>: ReadContext;
 }
 
+/// The node inside `Expr` that knows how to evaluate itself.
 pub trait ExprNode<N, S>: Send + Sync + 'static
 where
     S: ExprSchema,
@@ -124,6 +126,7 @@ impl<N: SelectExprNodeImpl<S>, S: ExprSchema> Clone for Expr<N, S> {
     }
 }
 
+/// Emitted by expressions when evaluation fails.
 #[derive(Debug, PartialEq)]
 pub enum ExpressionError {
     MissingAttribute,

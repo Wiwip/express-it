@@ -4,7 +4,7 @@ use std::any::Any;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-/// The human-readable path used by your user library to build expressions.
+/// The human-readable path used by user libraries to build expressions.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Path {
@@ -13,9 +13,7 @@ pub struct Path {
 
 impl Path {
     pub fn new(path: impl Into<SmolStr>) -> Self {
-        Self {
-            inner: path.into(),
-        }
+        Self { inner: path.into() }
     }
 
     /// Automatically uses the Rust type name as the root
@@ -33,9 +31,7 @@ impl Path {
 
     /// Creates a new Path from a specific name
     pub fn from_name(name: impl Into<SmolStr>) -> Self {
-        Self {
-            inner: name.into(),
-        }
+        Self { inner: name.into() }
     }
 
     pub fn from_segments(segments: &[&str]) -> Self {
