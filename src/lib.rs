@@ -8,5 +8,4 @@ pub mod integer;
 pub mod logic;
 pub mod num_cast;
 
-#[cfg(test)]
-mod test_utils;
+pub mod test_utils;
