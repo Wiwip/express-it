@@ -129,7 +129,7 @@ impl<N: SelectExprNodeImpl<S>, S: ExprSchema> Clone for Expr<N, S> {
 /// Emitted by expressions when evaluation fails.
 #[derive(Debug, PartialEq)]
 pub enum ExpressionError {
-    MissingAttribute,
+    MissingValue,
     InvalidTypes,
     InvalidPath(SmolStr),
     InvalidOperationNeg,
@@ -141,8 +141,8 @@ pub enum ExpressionError {
 impl std::fmt::Display for ExpressionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExpressionError::MissingAttribute => {
-                write!(f, "Failed to retrieve attribute from context.")
+            ExpressionError::MissingValue => {
+                write!(f, "Failed to retrieve value for path from context.")
             }
             ExpressionError::InvalidTypes => {
                 write!(f, "Invalid expression type.")

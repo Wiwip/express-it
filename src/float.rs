@@ -214,8 +214,8 @@ mod tests {
         let expr = Atk::get("nothing").unwrap_or(Atk::get(DST));
         assert_eq!(expr.eval(&ctx).unwrap(), 10.0);
 
-        // Missing Attribute Error
+        // Missing value error
         let missing = Atk::get("nothing");
-        assert_eq!(missing.eval(&ctx), Err(ExpressionError::MissingAttribute));
+        assert_eq!(missing.eval(&ctx), Err(ExpressionError::MissingValue));
     }
 }

@@ -31,12 +31,12 @@ impl ReadContext for BenchContext {
             self.atk
                 .as_ref()
                 .map(|v| v.as_ref() as &dyn Any)
-                .ok_or(ExpressionError::MissingAttribute)
+                .ok_or(ExpressionError::MissingValue)
         } else {
             self.def
                 .as_ref()
                 .map(|v| v.as_ref() as &dyn Any)
-                .ok_or(ExpressionError::MissingAttribute)
+                .ok_or(ExpressionError::MissingValue)
         }
     }
 }

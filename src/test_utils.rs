@@ -49,7 +49,7 @@ impl MapContext {
 
 impl ReadContext for MapContext {
     fn get_any(&self, path: &Path) -> Result<&dyn Any, ExpressionError> {
-        let val = self.0.get(path).ok_or(ExpressionError::MissingAttribute)?;
+        let val = self.0.get(path).ok_or(ExpressionError::MissingValue)?;
         Ok(val.as_ref())
     }
 }

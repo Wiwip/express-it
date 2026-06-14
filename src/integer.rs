@@ -173,11 +173,11 @@ mod tests {
         let expr_div = IntAtk::get(DST) / IntAtk::get(SRC);
         assert_eq!(expr_div.eval(&ctx), Err(ExpressionError::DivisionByZero));
 
-        // Missing Attribute
+        // Missing value
         let expr_missing = IntAtk::get("nothing");
         assert_eq!(
             expr_missing.eval(&ctx),
-            Err(ExpressionError::MissingAttribute)
+            Err(ExpressionError::MissingValue)
         );
     }
 }
