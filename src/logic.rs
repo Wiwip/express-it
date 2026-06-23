@@ -1,606 +1,490 @@
-use crate::context::{Path, ReadContext};
-use crate::expr::{
-    Expr, ExprNode, ExprSchema, ExpressionError, IfThenNode, SelectExprNode, SelectExprNodeImpl,
-};
-use num_traits::Num;
-use std::collections::HashSet;
-use std::sync::Arc;
+use crate::expr::{AsExpression, Context, Expr};
+use crate::nodes::Node;
+use std::fmt;
+use std::marker::PhantomData;
 
-/// Comparison helpers on any numeric expression.
-pub trait CompareExpr<S: ExprSchema>: Sized {
-    fn compare(self, op: ComparisonOp, rhs: impl Into<Self>) -> BoolExpr<S>;
+#[derive(Copy, Clone)]
+pub struct LogicalNotNode<E> {
+    pub inner: E,
+}
 
-    fn gt(self, rhs: impl Into<Self>) -> BoolExpr<S> {
-        self.compare(ComparisonOp::Gt, rhs)
-    }
-    fn ge(self, rhs: impl Into<Self>) -> BoolExpr<S> {
-        self.compare(ComparisonOp::Ge, rhs)
-    }
-    fn lt(self, rhs: impl Into<Self>) -> BoolExpr<S> {
-        self.compare(ComparisonOp::Lt, rhs)
-    }
-    fn le(self, rhs: impl Into<Self>) -> BoolExpr<S> {
-        self.compare(ComparisonOp::Le, rhs)
-    }
-    fn eq(self, rhs: impl Into<Self>) -> BoolExpr<S> {
-        self.compare(ComparisonOp::Eq, rhs)
-    }
-    fn ne(self, rhs: impl Into<Self>) -> BoolExpr<S> {
-        self.compare(ComparisonOp::Ne, rhs)
+impl<C: Context, E: Expr<bool, C>> Expr<bool, C> for LogicalNotNode<E> {
+    #[inline(always)]
+    fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> bool {
+        !self.inner.eval(ctx)
     }
 }
 
-pub type BoolExpr<S> = Expr<bool, S>;
-
-/// Boolean expression wrapper with constant/logic helpers.
-impl<S: ExprSchema> BoolExpr<S> {
-    pub fn true_() -> BoolExpr<S> {
-        let node = BoolExprNode::Lit(true);
-        BoolExpr::new(Arc::new(node))
-    }
-
-    pub fn false_() -> BoolExpr<S> {
-        let node = BoolExprNode::Lit(false);
-        BoolExpr::new(Arc::new(node))
-    }
-
-    pub fn if_then_else<N>(
-        self,
-        if_true_expr: impl Into<Expr<N, S>>,
-        if_false_expr: impl Into<Expr<N, S>>,
-    ) -> Expr<N, S>
-    where
-        N: Num + SelectExprNodeImpl<S, Property = N> + Send + Sync,
-        SelectExprNode<N, S>: IfThenNode<N, S>,
-    {
-        let bool_expr = self;
-        let t: Expr<N, S> = if_true_expr.into();
-        let f: Expr<N, S> = if_false_expr.into();
-
-        // Build the correct node type (int or float) via the trait, not via the ExprNode directly
-        let node = <SelectExprNode<N, S> as IfThenNode<N, S>>::if_then(bool_expr, t, f);
-
-        Expr::<N, S>::new(Arc::new(node))
-    }
-
-    pub fn then<N>(self, if_true_expr: impl Into<Expr<N, S>>) -> PartialConditional<N, S>
-    where
-        N: Num + SelectExprNodeImpl<S, Property = N> + Send + Sync + 'static,
-        SelectExprNode<N, S>: IfThenNode<N, S>,
-    {
-        PartialConditional {
-            bool_expr: self,
-            if_true_expr: if_true_expr.into(),
-        }
-    }
-
-    pub fn nand(self, other: BoolExpr<S>) -> BoolExpr<S> {
-        !(self & other)
-    }
-
-    pub fn nor(self, other: BoolExpr<S>) -> BoolExpr<S> {
-        !(self | other)
-    }
-
-    pub fn xnor(self, other: BoolExpr<S>) -> BoolExpr<S> {
-        !(self ^ other)
+impl<E: fmt::Display> fmt::Display for LogicalNotNode<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(not {})", self.inner)
     }
 }
 
-/// Adds `all()` and `any()` to slices of `BoolExpr`.
-pub trait BoolExprExt<S: ExprSchema> {
-    fn all(&self) -> BoolExpr<S>;
-    fn any(&self) -> BoolExpr<S>;
+pub trait ExprLogicNot {
+    type Output;
+    fn not(self) -> Self::Output;
 }
 
-impl<S: ExprSchema> BoolExprExt<S> for [BoolExpr<S>] {
-    fn all(&self) -> BoolExpr<S> {
-        self.iter().cloned().fold(BoolExpr::true_(), |a, b| a & b)
-    }
+impl<C: Context, L: Expr<bool, C> + Copy> ExprLogicNot for Node<bool, C, L> {
+    type Output = Node<bool, C, LogicalNotNode<L>>;
 
-    fn any(&self) -> BoolExpr<S> {
-        self.iter().cloned().fold(BoolExpr::false_(), |a, b| a | b)
-    }
-}
-
-impl<S: ExprSchema> std::ops::Not for BoolExpr<S> {
-    type Output = BoolExpr<S>;
-
+    #[inline(always)]
     fn not(self) -> Self::Output {
-        let node = BoolExprNode::UnaryOp {
-            op: LogicUnaryOp::Not,
-            expr: self,
-        };
-        Expr::new(Arc::new(node))
+        Node {
+            expr: LogicalNotNode { inner: self.expr },
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
-impl<S: ExprSchema> std::ops::BitAnd for BoolExpr<S> {
-    type Output = BoolExpr<S>;
+macro_rules! impl_cmp_method {
+    ($trait_name:ident, $method_name:ident, $node_name:ident, $bound:path, $operator:tt) => {
+        #[derive(Copy, Clone)]
+        pub struct $node_name<N, L, R> {
+            pub lhs: L,
+            pub rhs: R,
+            pub _marker: std::marker::PhantomData<N>,
+        }
 
-    fn bitand(self, rhs: Self) -> Self::Output {
-        let node = BoolExprNode::BinaryOp {
-            lhs: self,
-            op: LogicBinaryOp::And,
-            rhs,
-        };
-        Expr::new(Arc::new(node))
-    }
-}
+        impl<N: $bound, C: Context, L, R> Expr<bool, C> for $node_name<N, L, R>
+        where
+            L: Expr<N, C>,
+            R: Expr<N, C>,
+        {
+            #[inline(always)]
+            fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> bool {
+                self.lhs.eval(ctx) $operator self.rhs.eval(ctx)
+            }
+        }
 
-impl<S: ExprSchema> std::ops::BitOr for BoolExpr<S> {
-    type Output = BoolExpr<S>;
+        impl<N: fmt::Display, L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<N, L, R> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "({} {} {})", self.lhs, stringify!($operator), self.rhs)
+            }
+        }
 
-    fn bitor(self, rhs: Self) -> Self::Output {
-        let node = BoolExprNode::BinaryOp {
-            lhs: self,
-            op: LogicBinaryOp::Or,
-            rhs,
-        };
-        Expr::new(Arc::new(node))
-    }
-}
+        pub trait $trait_name<R> {
+            type Output;
+            fn $method_name(self, rhs: R) -> Self::Output;
+        }
 
-impl<S: ExprSchema> std::ops::BitXor for BoolExpr<S> {
-    type Output = BoolExpr<S>;
+        impl<N, C, L, R> $trait_name<R> for Node<N, C, L>
+        where
+            N: $bound + Copy,
+            C: Context,
+            L: Expr<N, C> + Copy,
+            R: AsExpression<N, C>,
+            R::Target: Copy,
+        {
+            type Output = Node<bool, C, $node_name<N, L, R::Target>>;
 
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        let node = BoolExprNode::BinaryOp {
-            lhs: self,
-            op: LogicBinaryOp::Xor,
-            rhs,
-        };
-        Expr::new(Arc::new(node))
-    }
-}
-
-pub enum BoolExprNode<S: ExprSchema> {
-    Lit(bool),
-    Boxed(Box<dyn ExprNode<bool, S>>),
-    UnaryOp {
-        op: LogicUnaryOp,
-        expr: BoolExpr<S>,
-    },
-    BinaryOp {
-        lhs: BoolExpr<S>,
-        op: LogicBinaryOp,
-        rhs: BoolExpr<S>,
-    },
-}
-
-impl<S: ExprSchema> ExprNode<bool, S> for BoolExprNode<S> {
-    fn eval<'w, 's>(&self, ctx: &S::Context<'w, 's>) -> Result<bool, ExpressionError> {
-        match self {
-            BoolExprNode::Lit(lit) => Ok(lit.clone()),
-            BoolExprNode::Boxed(value) => Ok(value.eval(ctx)?),
-            BoolExprNode::UnaryOp { op, expr } => match op {
-                LogicUnaryOp::Not => Ok(!expr.eval(ctx)?),
-            },
-            BoolExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.eval(ctx)?;
-                let r = rhs.eval(ctx)?;
-                match op {
-                    LogicBinaryOp::And => Ok(l && r),
-                    LogicBinaryOp::Or => Ok(l || r),
-                    LogicBinaryOp::Xor => Ok(l ^ r),
+            #[inline(always)]
+            fn $method_name(self, rhs: R) -> Self::Output {
+                Node {
+                    expr: $node_name {
+                        lhs: self.expr,
+                        rhs: rhs.as_expr(),
+                        _marker: std::marker::PhantomData,
+                    },
+                    _marker: std::marker::PhantomData,
                 }
             }
         }
-    }
+    };
+}
 
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
-        match self {
-            BoolExprNode::Lit(lit) => Ok(lit.clone()),
-            BoolExprNode::Boxed(value) => Ok(value.eval_dyn(ctx)?),
-            BoolExprNode::UnaryOp { op, expr } => match op {
-                LogicUnaryOp::Not => Ok(!expr.inner.eval_dyn(ctx)?),
-            },
-            BoolExprNode::BinaryOp { lhs, op, rhs } => {
-                let l = lhs.inner.eval_dyn(ctx)?;
-                let r = rhs.inner.eval_dyn(ctx)?;
-                match op {
-                    LogicBinaryOp::And => Ok(l && r),
-                    LogicBinaryOp::Or => Ok(l || r),
-                    LogicBinaryOp::Xor => Ok(l ^ r),
+impl_cmp_method!(ExprCmpGt, gt, GreaterThanNode,  std::cmp::PartialOrd, >);
+impl_cmp_method!(ExprCmpLt, lt, LessThanNode,     std::cmp::PartialOrd, <);
+impl_cmp_method!(ExprCmpEq, eq, EqualsNode,       std::cmp::PartialEq, ==);
+impl_cmp_method!(ExprCmpNotEq, ne, NotEqualsNode, std::cmp::PartialEq, !=);
+impl_cmp_method!(ExprCmpGe, ge, GreaterEqualNode, std::cmp::PartialOrd, >=);
+impl_cmp_method!(ExprCmpLe, le, LessEqualNode,    std::cmp::PartialOrd, <=);
+
+macro_rules! impl_logical_method {
+    ($trait_name:ident, $method_name:ident, $node_name:ident, $operator:tt) => {
+        #[derive(Copy, Clone)]
+        pub struct $node_name<L, R> {
+            pub lhs: L,
+            pub rhs: R,
+        }
+
+        impl<C: Context, L, R> Expr<bool, C> for $node_name<L, R>
+        where
+            L: Expr<bool, C>,
+            R: Expr<bool, C>,
+        {
+            #[inline(always)]
+            fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> bool {
+                self.lhs.eval(ctx) $operator self.rhs.eval(ctx)
+            }
+        }
+
+        impl<L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<L, R> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "({} {} {})", self.lhs, stringify!($operator), self.rhs)
+            }
+        }
+
+        pub trait $trait_name<R> {
+            type Output;
+            fn $method_name(self, rhs: R) -> Self::Output;
+        }
+
+        impl<C, L, R> $trait_name<R> for Node<bool, C, L>
+        where
+            C: Context,
+            L: Expr<bool, C> + Copy,
+            R: AsExpression<bool, C>,
+            R::Target: Copy,
+        {
+            type Output = Node<bool, C, $node_name<L, R::Target>>;
+
+            #[inline(always)]
+            fn $method_name(self, rhs: R) -> Self::Output {
+                Node {
+                    expr: $node_name {
+                        lhs: self.expr,
+                        rhs: rhs.as_expr(),
+                    },
+                    _marker: PhantomData,
                 }
             }
         }
-    }
+    };
+}
 
-    fn get_dependencies(&self, deps: &mut HashSet<Path>) {
-        match self {
-            BoolExprNode::Lit(_) => {}
-            BoolExprNode::Boxed(value) => {
-                value.get_dependencies(deps);
-            }
-            BoolExprNode::UnaryOp { expr, .. } => {
-                expr.inner.get_dependencies(deps);
-            }
-            BoolExprNode::BinaryOp { lhs, rhs, .. } => {
-                lhs.inner.get_dependencies(deps);
-                rhs.inner.get_dependencies(deps);
+// all/any
+impl_logical_method!(ExprLogicalAnd, and, LogicalAndNode, &&);
+impl_logical_method!(ExprLogicalOr,  or,  LogicalOrNode,  ||);
+impl_logical_method!(ExprLogicalXor, xor, LogicalXorNode,  ^);
+
+macro_rules! impl_neg_logical_method {
+    ($trait_name:ident, $method_name:ident, $node_name:ident, $operator:tt) => {
+        #[derive(Copy, Clone)]
+        pub struct $node_name<L, R> {
+            pub lhs: L,
+            pub rhs: R,
+        }
+
+        impl<C: Context, L, R> Expr<bool, C> for $node_name<L, R>
+        where
+            L: Expr<bool, C>,
+            R: Expr<bool, C>,
+        {
+            #[inline(always)]
+            fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> bool {
+                !(self.lhs.eval(ctx) $operator self.rhs.eval(ctx))
             }
         }
-    }
-}
 
-#[derive(Debug, Clone, Copy)]
-pub enum ComparisonOp {
-    Eq, // equal
-    Ne, // not equal
-    Gt, // greater than
-    Ge, // greater or equal
-    Lt, // less than
-    Le, // less or equal
-}
-
-impl ComparisonOp {
-    pub fn compare<N: PartialOrd>(&self, lhs: &N, rhs: &N) -> bool {
-        match self {
-            ComparisonOp::Eq => lhs == rhs,
-            ComparisonOp::Ne => lhs != rhs,
-            ComparisonOp::Gt => lhs > rhs,
-            ComparisonOp::Ge => lhs >= rhs,
-            ComparisonOp::Lt => lhs < rhs,
-            ComparisonOp::Le => lhs <= rhs,
+        impl<L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<L, R> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "!({} {} {})", self.lhs, stringify!($operator), self.rhs)
+            }
         }
-    }
+
+        pub trait $trait_name<R> {
+            type Output;
+            fn $method_name(self, rhs: R) -> Self::Output;
+        }
+
+        impl<C, L, R> $trait_name<R> for Node<bool, C, L>
+        where
+            C: Context,
+            L: Expr<bool, C> + Copy,
+            R: AsExpression<bool, C>,
+            R::Target: Copy,
+        {
+            type Output = Node<bool, C, $node_name<L, R::Target>>;
+
+            #[inline(always)]
+            fn $method_name(self, rhs: R) -> Self::Output {
+                Node {
+                    expr: $node_name {
+                        lhs: self.expr,
+                        rhs: rhs.as_expr(),
+                    },
+                    _marker: PhantomData,
+                }
+            }
+        }
+    };
 }
 
-pub struct Compare<N: SelectExprNodeImpl<S>, S: ExprSchema> {
-    pub lhs: Expr<N, S>,
-    pub op: ComparisonOp,
-    pub rhs: Expr<N, S>,
+impl_neg_logical_method!(ExprLogicalNand, nand, LogicalNandNode, &&);
+impl_neg_logical_method!(ExprLogicalNor,  nor,  LogicalNorNode,  ||);
+impl_neg_logical_method!(ExprLogicalNxor, nxor, LogicalNxorNode,  ^);
+
+#[macro_export]
+macro_rules! all {
+    () => {{ Node::lit(true) }};
+    ($head:expr $(, $tail:expr)* $(,)?) => {{
+        $head
+        $(
+            .and($tail)
+        )*
+    }};
 }
 
-impl<N, S> ExprNode<bool, S> for Compare<N, S>
-where
-    N: SelectExprNodeImpl<S, Property = N> + PartialOrd + Send + Sync + Copy + 'static,
-    S: ExprSchema,
-{
-    fn eval<'w, 's>(&self, ctx: &S::Context<'w, 's>) -> Result<bool, ExpressionError> {
-        let l = self.lhs.eval(ctx)?;
-        let r = self.rhs.eval(ctx)?;
-        Ok(self.op.compare(&l, &r))
-    }
-
-    fn eval_dyn(&self, ctx: &dyn ReadContext) -> Result<bool, ExpressionError> {
-        let l = self.lhs.inner.eval_dyn(ctx)?;
-        let r = self.rhs.inner.eval_dyn(ctx)?;
-        Ok(self.op.compare(&l, &r))
-    }
-
-    fn get_dependencies(&self, deps: &mut HashSet<Path>) {
-        self.rhs.inner.get_dependencies(deps);
-        self.lhs.inner.get_dependencies(deps);
-    }
+#[macro_export]
+macro_rules! any {
+    () => {{ Node::lit(false) }};
+    ($head:expr $(, $tail:expr)* $(,)?) => {{
+        $head
+        $(
+            .or($tail)
+        )*
+    }};
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum LogicUnaryOp {
-    Not,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum LogicBinaryOp {
-    And,
-    Or,
-    Xor,
-}
-
-pub struct PartialConditional<N: SelectExprNodeImpl<S>, S: ExprSchema> {
-    pub bool_expr: BoolExpr<S>,
-    pub if_true_expr: Expr<N, S>,
-}
-
-impl<N, S> PartialConditional<N, S>
-where
-    N: Num + Send + Sync + 'static + SelectExprNodeImpl<S, Property = N>,
-    SelectExprNode<N, S>: IfThenNode<N, S>,
-    S: ExprSchema,
-{
-    pub fn otherwise(self, if_false_expr: impl Into<Expr<N, S>>) -> Expr<N, S> {
-        let node = <SelectExprNode<N, S> as IfThenNode<N, S>>::if_then(
-            self.bool_expr,
-            self.if_true_expr,
-            if_false_expr.into(),
-        );
-
-        Expr::<N, S>::new(Arc::new(node))
+impl<C: Context> Expr<bool, C> for bool {
+    #[inline(always)]
+    fn eval(&self, _ctx: &C::ContextItem<'_, '_>) -> bool {
+        *self
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::logic::{BoolExpr, BoolExprExt, CompareExpr};
-    use crate::test_utils::scopes::{DST, SRC};
-    use crate::test_utils::{Atk, Hp, IntDef, IntHp, MapContext, MapSchema};
+    use crate::expr::{Context, Expr};
+    use crate::logic::*;
+    use crate::nodes::{Node, VarNode};
+    use std::marker::PhantomData;
 
-    #[test]
-    fn test_complex_comparison_operators() {
-        let mut ctx = MapContext::default();
-        ctx.insert::<IntHp>(SRC, 100);
-        ctx.insert::<IntHp>(DST, 200);
+    // 1. Setup a Mock Context for the Engine to Evaluate Against
+    pub struct MockEngine;
 
-        assert!(IntHp::get(SRC).lt(IntHp::get(DST)).eval(&ctx).unwrap());
-        assert!(IntHp::get(SRC).le(100).eval(&ctx).unwrap());
-        assert!(IntHp::get(DST).gt(IntHp::get(SRC)).eval(&ctx).unwrap());
-        assert!(IntHp::get(DST).ge(200).eval(&ctx).unwrap());
-        assert!(IntHp::get(SRC).ne(IntHp::get(DST)).eval(&ctx).unwrap());
-        assert!(IntHp::get(SRC).eq(100).eval(&ctx).unwrap());
+    pub struct MockPlayerData {
+        pub damage: f32,
+        pub level: i32,
+        pub is_poisoned: bool,
+    }
+
+    impl Context for MockEngine {
+        // Using a reference to our player data struct as the runtime context item
+        type ContextItem<'w, 's> = &'w MockPlayerData;
+    }
+
+    // Helper to create a variable node cleanly in tests
+    fn var<N>(
+        f: for<'a, 'w> fn(&'a &'w MockPlayerData) -> N,
+    ) -> Node<N, MockEngine, VarNode<N, MockEngine>> {
+        Node {
+            expr: VarNode { fetch_fn: f },
+            _marker: PhantomData,
+        }
     }
 
     #[test]
-    fn test_nested_logic_expressions() {
-        let ctx = MapContext::default();
-        let t = BoolExpr::<MapSchema>::true_();
-        let f = BoolExpr::false_();
+    fn test_primitive_as_expression_literals() {
+        let ctx_data = MockPlayerData {
+            damage: 100.0,
+            level: 1,
+            is_poisoned: false,
+        };
 
-        // Testing: !(True & False) | False  => !False | False => True | False => True
-        let expr = (!(t.clone() & f.clone())) | f.clone();
-        assert_eq!(expr.eval(&ctx).unwrap(), true);
+        // Ensure literal creation and AsExpression are functional
+        let lit_true = true;
+        let lit_false = false;
 
-        // Testing: (True ^ True) & True => False & True => False
-        let expr2 = (t.clone() ^ t.clone()) & t.clone();
-        assert_eq!(expr2.eval(&ctx).unwrap(), false);
+        assert!(Expr::<bool, MockEngine>::eval(&lit_true, &&ctx_data));
+        assert!(!Expr::<bool, MockEngine>::eval(&lit_false, &&ctx_data));
     }
 
     #[test]
-    fn test_conditional_logic_nesting() {
-        let mut ctx = MapContext::default();
-        ctx.insert::<Atk>(SRC, 50.0);
+    fn test_basic_comparisons() {
+        let ctx_data = MockPlayerData {
+            damage: 150.0,
+            level: 10,
+            is_poisoned: false,
+        };
 
-        // Complex scenario:
-        // If (Atk > 100) then 1.0
-        // else if (Atk > 40) then 2.0
-        // else 3.0
-        let nested_if = Atk::get(SRC)
+        let damage_node = Node::<f32, MockEngine, _>::lit(150.0);
+
+        // Test Greater Than (gt) and Less Than (lt) using automatic primitive conversions
+        let is_gt = damage_node.gt(100.0);
+        let is_lt = damage_node.lt(50.0);
+        let is_eq = damage_node.eq(150.0);
+
+        assert!(is_gt.eval(&&ctx_data), "150.0 should be greater than 100.0");
+        assert!(
+            !is_lt.eval(&&ctx_data),
+            "150.0 should not be less than 50.0"
+        );
+        assert!(is_eq.eval(&&ctx_data), "150.0 should equal 150.0");
+    }
+
+    #[test]
+    fn test_logical_and_or_chaining() {
+        let ctx_data = MockPlayerData {
+            damage: 150.0,
+            level: 10,
+            is_poisoned: false,
+        };
+
+        let t = Node::<bool, MockEngine, _>::lit(true);
+        let f = Node::<bool, MockEngine, _>::lit(false);
+
+        // Test combination scenarios
+        assert!(t.and(true).eval(&&ctx_data));
+        assert!(!t.and(false).eval(&&ctx_data));
+        assert!(t.or(false).eval(&&ctx_data));
+        assert!(!f.or(false).eval(&&ctx_data));
+
+        // Complex structural chain: (true && false) || true => true
+        let complex_chain = t.and(f).or(t);
+        assert!(complex_chain.eval(&&ctx_data));
+    }
+
+    #[test]
+    fn test_dynamic_variable_evaluation() {
+        // Setup two different engine states to ensure the expressions are evaluated lazily
+        let low_state = MockPlayerData {
+            damage: 45.0,
+            level: 5,
+            is_poisoned: false,
+        };
+        let high_state = MockPlayerData {
+            damage: 120.0,
+            level: 60,
+            is_poisoned: true,
+        };
+
+        // Construct dynamic rule expressions using variable captures
+        let dynamic_damage = var(|ctx| ctx.damage);
+        let dynamic_poison = var(|ctx| ctx.is_poisoned);
+        let dynamic_level = var(|ctx| ctx.level);
+
+        // Rule: (Damage > 100.0 AND level >= 50) OR target is poisoned
+        let boss_mechanic_trigger = dynamic_damage
             .gt(100.0)
-            .then(1.0)
-            .otherwise(Atk::get(SRC).gt(40.0).then(2.0).otherwise(3.0));
+            .and(dynamic_level.ge(50))
+            .or(dynamic_poison);
 
-        assert_eq!(nested_if.eval(&ctx).unwrap(), 2.0);
+        // Verify state 1 (Low state matches none of the criteria)
+        assert!(
+            !boss_mechanic_trigger.eval(&&low_state),
+            "Low state should not trigger mechanic"
+        );
 
-        // Update context to trigger the "else"
-        ctx.insert::<Atk>(SRC, 10.0);
-        assert_eq!(nested_if.eval(&ctx).unwrap(), 3.0);
+        // Verify state 2 (High state matches all criteria)
+        assert!(
+            boss_mechanic_trigger.eval(&&high_state),
+            "High state should successfully trigger mechanic"
+        );
     }
 
     #[test]
-    fn test_logic_with_attribute_lookup() {
-        let mut ctx = MapContext::default();
-        // If not, we simulate it by comparing attributes
-        ctx.insert::<IntHp>(SRC, 0);
-        ctx.insert::<IntDef>(SRC, 10);
+    fn test_node_is_copy() {
+        let ctx_data = MockPlayerData {
+            damage: 150.0,
+            level: 10,
+            is_poisoned: false,
+        };
+        let damage_node = Node::<f32, MockEngine, _>::lit(150.0);
 
-        // is_dead = HP <= 0
-        let is_dead = IntHp::get(SRC).le(0);
-        // has_armor = DEF > 0
-        let has_armor = IntDef::get(SRC).gt(0);
+        // If Node is Copy, we can reuse `damage_node` across multiple calls
+        // without compiling into a "use of moved value" panic or compile error.
+        let check_one = damage_node.gt(100.0);
+        let check_two = damage_node.lt(200.0); // Reusing safely!
 
-        // Can move if (!is_dead & has_armor)
-        let can_move = (!is_dead.clone()) & has_armor.clone();
-        assert_eq!(can_move.eval(&ctx).unwrap(), false);
-
-        // Revive
-        ctx.insert::<IntHp>(SRC, 50);
-        assert_eq!(can_move.eval(&ctx).unwrap(), true);
+        assert!(check_one.eval(&&ctx_data));
+        assert!(check_two.eval(&&ctx_data));
     }
 
     #[test]
-    fn test_boolean_casting_and_if_then_cross_types() {
-        let mut ctx = MapContext::default();
-        ctx.insert::<IntHp>(SRC, 100);
+    fn test_mixed_variable_to_variable_comparisons() {
+        let ctx_data = MockPlayerData {
+            damage: 150.0,
+            level: 10,
+            is_poisoned: false,
+        };
 
-        // Combine logic with numeric outputs
-        // result = (HP == 100) ? 50.0 : 0.0
-        let expr = IntHp::get(SRC).eq(100).if_then_else(50.0, 0.0);
+        let damage_node = var(|ctx| ctx.damage);
+        let level_node = var(|ctx| ctx.level as f32);
 
-        let res = expr.eval(&ctx).unwrap();
-        // Check if it correctly returned a float 50.0
-        assert_eq!(res, 50.0);
+        let comparison = damage_node.gt(level_node);
+
+        assert!(comparison.eval(&&ctx_data));
     }
 
     #[test]
-    fn test_selector_logic() {
-        let mut ctx = MapContext::default();
-        ctx.insert::<Atk>(SRC, 10.0);
-        ctx.insert::<Hp>(SRC, 20.0);
+    fn test_all_macro_true() {
+        let ctx_data = MockPlayerData {
+            damage: 50.0,
+            level: 10,
+            is_poisoned: false,
+        };
 
-        let select_atk_expr = Atk::get(SRC).gt(15.0);
-        let select_def_expr = Hp::get(SRC).gt(15.0);
+        let cond1 = Node::<f32, MockEngine, _>::new(|ctx| ctx.damage).gt(0.0);
+        let cond2 = Node::<i32, MockEngine, _>::new(|ctx| ctx.level).gt(0);
+        let cond3 = Node::<bool, MockEngine, _>::new(|ctx| ctx.is_poisoned).not();
 
-        let expr_result = select_atk_expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, false);
-        // If Atk greater than 15.0, return 50.0 else return 100.0
-        let expr_result = select_atk_expr
-            .clone()
-            .if_then_else(50.0, 100.0)
-            .eval(&ctx)
-            .unwrap();
-        assert_eq!(expr_result, 100.0);
-        let expr_result = select_atk_expr
-            .then(50.0)
-            .otherwise(100.0)
-            .eval(&ctx)
-            .unwrap();
-        assert_eq!(expr_result, 100.0);
-
-        let expr_result = select_def_expr.eval(&ctx).unwrap();
-        assert_eq!(expr_result, true);
-        // If Def greater than 15.0, return 150.0 else return 550.0
-        let expr_result = select_def_expr
-            .clone()
-            .if_then_else(150.0, 550.0)
-            .eval(&ctx)
-            .unwrap();
-        assert_eq!(expr_result, 150.0);
-
-        let expr_result = select_def_expr
-            .then(150.0)
-            .otherwise(550.0)
-            .eval(&ctx)
-            .unwrap();
-        assert_eq!(expr_result, 150.0);
+        let all_true = all![cond1, cond2, cond3];
+        assert!(all_true.eval(&&ctx_data));
     }
 
     #[test]
-    fn test_and() {
-        let ctx = MapContext::default();
+    fn test_all_macro_false() {
+        let ctx_data = MockPlayerData {
+            damage: 50.0,
+            level: 10,
+            is_poisoned: false,
+        };
 
-        let t = BoolExpr::<MapSchema>::true_();
-        let f = BoolExpr::false_();
+        let cond1 = Node::<f32, MockEngine, _>::new(|ctx| ctx.damage).gt(0.0);
+        let cond2 = Node::<bool, MockEngine, _>::new(|ctx| ctx.is_poisoned);
+        let cond3 = Node::<i32, MockEngine, _>::new(|ctx| ctx.level).gt(0);
 
-        // (A, B) → expected
-        let cases = [
-            (f.clone(), f.clone(), false),
-            (f.clone(), t.clone(), false),
-            (t.clone(), f.clone(), false),
-            (t.clone(), t.clone(), true),
-        ];
-
-        for (a, b, expected) in cases {
-            let result = (a & b).eval(&ctx).unwrap();
-            assert_eq!(result, expected);
-        }
+        let all_check = all![cond1, cond2, cond3];
+        assert!(!all_check.eval(&&ctx_data));
     }
 
     #[test]
-    fn test_or() {
-        let ctx = MapContext::default();
+    fn test_any_macro_true_first() {
+        let ctx_data = MockPlayerData {
+            damage: 0.0,
+            level: 0,
+            is_poisoned: true,
+        };
 
-        let t = BoolExpr::<MapSchema>::true_();
-        let f = BoolExpr::false_();
+        let cond1 = Node::<f32, MockEngine, _>::new(|ctx| ctx.damage).gt(10.0);
+        let cond2 = Node::<bool, MockEngine, _>::new(|ctx| ctx.is_poisoned);
 
-        let cases = [
-            (f.clone(), f.clone(), false),
-            (f.clone(), t.clone(), true),
-            (t.clone(), f.clone(), true),
-            (t.clone(), t.clone(), true),
-        ];
-
-        for (a, b, expected) in cases {
-            let result = (a | b).eval(&ctx).unwrap();
-            assert_eq!(result, expected);
-        }
+        let any_check = any![cond1, cond2];
+        assert!(any_check.eval(&&ctx_data));
     }
 
     #[test]
-    fn test_xor() {
-        let ctx = MapContext::default();
+    fn test_any_macro_true_last() {
+        let ctx_data = MockPlayerData {
+            damage: 5.0,
+            level: 1,
+            is_poisoned: false,
+        };
 
-        let t = BoolExpr::<MapSchema>::true_();
-        let f = BoolExpr::false_();
+        let cond1 = Node::<f32, MockEngine, _>::new(|ctx| ctx.damage).gt(10.0);
+        let cond2 = Node::<i32, MockEngine, _>::new(|ctx| ctx.level).ge(2);
+        let cond3 = Node::<bool, MockEngine, _>::new(|ctx| ctx.is_poisoned).not();
 
-        let cases = [
-            (f.clone(), f.clone(), false),
-            (f.clone(), t.clone(), true),
-            (t.clone(), f.clone(), true),
-            (t.clone(), t.clone(), false),
-        ];
-
-        for (a, b, expected) in cases {
-            let result = (a ^ b).eval(&ctx).unwrap();
-            assert_eq!(result, expected);
-        }
+        let any_check = any![cond1, cond2, cond3];
+        assert!(any_check.eval(&&ctx_data));
     }
 
     #[test]
-    fn test_nand() {
-        let ctx = MapContext::default();
-        let t = BoolExpr::<MapSchema>::true_();
-        let f = BoolExpr::false_();
+    fn test_any_macro_all_false() {
+        let ctx_data = MockPlayerData {
+            damage: 1.0,
+            level: 1,
+            is_poisoned: false,
+        };
 
-        let cases = [
-            (f.clone(), f.clone(), true),
-            (f.clone(), t.clone(), true),
-            (t.clone(), f.clone(), true),
-            (t.clone(), t.clone(), false),
-        ];
+        let cond1 = Node::<f32, MockEngine, _>::new(|ctx| ctx.damage).gt(10.0);
+        let cond2 = Node::<i32, MockEngine, _>::new(|ctx| ctx.level).ge(2);
+        let cond3 = Node::<bool, MockEngine, _>::new(|ctx| ctx.is_poisoned);
 
-        for (a, b, expected) in cases {
-            let result = a.nand(b).eval(&ctx).unwrap();
-            assert_eq!(result, expected);
-        }
-    }
-
-    #[test]
-    fn test_nor() {
-        let ctx = MapContext::default();
-        let t = BoolExpr::<MapSchema>::true_();
-        let f = BoolExpr::false_();
-
-        let cases = [
-            (f.clone(), f.clone(), true),
-            (f.clone(), t.clone(), false),
-            (t.clone(), f.clone(), false),
-            (t.clone(), t.clone(), false),
-        ];
-
-        for (a, b, expected) in cases {
-            let result = a.nor(b).eval(&ctx).unwrap();
-            assert_eq!(result, expected);
-        }
-    }
-
-    #[test]
-    fn test_xnor() {
-        let ctx = MapContext::default();
-        let t = BoolExpr::<MapSchema>::true_();
-        let f = BoolExpr::false_();
-
-        let cases = [
-            (f.clone(), f.clone(), true),
-            (f.clone(), t.clone(), false),
-            (t.clone(), f.clone(), false),
-            (t.clone(), t.clone(), true),
-        ];
-
-        for (a, b, expected) in cases {
-            let result = a.xnor(b).eval(&ctx).unwrap();
-            assert_eq!(result, expected);
-        }
-    }
-
-    #[test]
-    fn test_all() {
-        let ctx = MapContext::default();
-        let t = BoolExpr::<MapSchema>::true_();
-        let f = BoolExpr::false_();
-
-        let cases = [
-            (vec![], true),
-            (vec![f.clone()], false),
-            (vec![f.clone(), f.clone()], false),
-            (vec![t.clone(), f.clone()], false),
-            (vec![f.clone(), t.clone()], false),
-            (vec![t.clone(), t.clone()], true),
-        ];
-
-        for (exprs, expected) in cases {
-            let result = exprs.all().eval(&ctx).unwrap();
-            assert_eq!(result, expected);
-        }
-    }
-
-    #[test]
-    fn test_any() {
-        let ctx = MapContext::default();
-        let t = BoolExpr::<MapSchema>::true_();
-        let f = BoolExpr::false_();
-
-        let cases = [
-            (vec![], false),
-            (vec![f.clone()], false),
-            (vec![f.clone(), f.clone()], false),
-            (vec![t.clone(), f.clone()], true),
-            (vec![f.clone(), t.clone()], true),
-            (vec![t.clone(), t.clone()], true),
-        ];
-
-        for (exprs, expected) in cases {
-            let result = exprs.any().eval(&ctx).unwrap();
-            assert_eq!(result, expected);
-        }
+        let any_check = any![cond1, cond2, cond3];
+        assert!(!any_check.eval(&&ctx_data));
     }
 }

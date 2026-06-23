@@ -1,41 +1,11 @@
 [package]
 name = "express-it"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
-log = "0.4"
 num-traits = "0.2"
-smol_str = "0.2.2"
 
 [dev-dependencies]
-env_logger = "0.11"
-criterion = "0.8.2"
-
-[features]
-serde = ["dep:serde", "dep:thiserror"]
-
-[dependencies.thiserror]
-version = "2"
-optional = true
-
-[dependencies.serde]
-version = "1"
-features = ["derive"]
-optional = true
-
-[[bench]]
-name = "float"
-harness = false
-
-[[bench]]
-name = "bool"
-harness = false
-
-[[bench]]
-name = "int"
-harness = false
-
-[[bench]]
-name = "plan"
-harness = false
+bevy = "0.19"
+criterion = "0.8"
