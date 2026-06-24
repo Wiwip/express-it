@@ -1,12 +1,16 @@
-use crate::nodes::{LiteralNode, Node};
+use crate::nodes::{LiteralNode, Node, VarNode};
 
-pub trait Context {
+pub trait Context: Send + Sync {
     type ContextItem<'w, 's>;
 }
 
 pub trait Expr<N, C: Context> {
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N;
 }
+
+pub type BoolExpr<C> = Node<bool, C, VarNode<bool, C>>;
+
+pub type StoredExpr<N, C> = Box<dyn Expr<N, C> + Send + Sync>;
 
 pub trait AsExpression<N, C: Context> {
     type Target: Expr<N, C>;

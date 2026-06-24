@@ -31,7 +31,7 @@ impl PlanCache {
 
 // ---------- StepExecutor ----------
 
-pub trait StepExecutor<C: Context> {
+pub trait StepExecutor<C: Context>: Send + Sync {
     /// Read-only: evaluate against current context + shared cache.
     fn evaluate(&self, ctx: &C::ContextItem<'_, '_>, cache: &PlanCache) -> Box<dyn Any>;
 
@@ -81,13 +81,15 @@ pub struct AssignmentStep<N: 'static, E, S> {
     pub setter_fn: S,
     pub expr: E,
     pub cache_key: Option<String>,
-    pub _marker: std::marker::PhantomData<N>,
+    pub _marker: PhantomData<N>,
 }
 
-impl<N: 'static + Clone, C: Context, E, S: Fn(&mut C::ContextItem<'_, '_>, N) + 'static>
-    StepExecutor<C> for AssignmentStep<N, E, S>
+impl<N, C, E, S> StepExecutor<C> for AssignmentStep<N, E, S>
 where
-    E: Expr<N, C>,
+    E: Expr<N, C> + Send + Sync,
+    N: 'static + Clone + Send + Sync,
+    C: Context,
+    S: Fn(&mut C::ContextItem<'_, '_>, N) + 'static + Send + Sync,
 {
     fn evaluate(&self, ctx: &C::ContextItem<'_, '_>, _cache: &PlanCache) -> Box<dyn Any> {
         Box::new(self.expr.eval(ctx))
@@ -114,7 +116,12 @@ where
 
 // Definition lives in `nodes.rs` so `Node::alias()` can return it.
 
-impl<N: 'static + Clone, C: Context, E: Expr<N, C>> StepExecutor<C> for CacheSaveStep<N, C, E> {
+impl<N, C, E> StepExecutor<C> for CacheSaveStep<N, C, E>
+where
+    N: 'static + Clone + Send + Sync,
+    C: Context,
+    E: Expr<N, C> + Send + Sync,
+{
     fn evaluate(&self, ctx: &C::ContextItem<'_, '_>, _cache: &PlanCache) -> Box<dyn Any> {
         Box::new(self.expr.eval(ctx))
     }
@@ -198,7 +205,7 @@ where
 
 impl<V, C: Context> StepExecutor<C> for CacheLookupStep<V>
 where
-    V: Clone + 'static,
+    V: Clone + 'static + Send + Sync,
 {
     fn evaluate(&self, _ctx: &C::ContextItem<'_, '_>, cache: &PlanCache) -> Box<dyn Any> {
         Box::new(

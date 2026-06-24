@@ -189,7 +189,13 @@ macro_rules! impl_binary_method {
 
         impl<L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<L, R> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}({}, {})", stringify!($method_name), self.lhs, self.rhs)
+                write!(
+                    f,
+                    "{}({}, {})",
+                    stringify!($method_name),
+                    self.lhs,
+                    self.rhs
+                )
             }
         }
 
@@ -329,7 +335,9 @@ macro_rules! impl_trinary_method {
                     f,
                     "{}({}, {}, {})",
                     stringify!($method_name),
-                    self.expr, self.arg1, self.arg2
+                    self.expr,
+                    self.arg1,
+                    self.arg2
                 )
             }
         }

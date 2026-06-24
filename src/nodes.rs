@@ -55,9 +55,7 @@ where
     }
 }
 
-impl<N: fmt::Display, C: Context, E: Expr<N, C> + fmt::Display> fmt::Display
-    for Node<N, C, E>
-{
+impl<N: fmt::Display, C: Context, E: Expr<N, C> + fmt::Display> fmt::Display for Node<N, C, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.expr)
     }
