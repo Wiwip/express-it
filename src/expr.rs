@@ -1,4 +1,6 @@
 use crate::nodes::{LiteralNode, Node, VarNode};
+use std::any::TypeId;
+use std::collections::HashSet;
 
 pub trait Context: Send + Sync {
     type ContextItem<'w, 's>;
@@ -6,6 +8,7 @@ pub trait Context: Send + Sync {
 
 pub trait Expr<N, C: Context> {
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N;
+    fn get_dependencies(&self, _deps: &mut HashSet<TypeId>) {}
 }
 
 pub type BoolExpr<C> = Node<bool, C, VarNode<bool, C>>;
@@ -13,14 +16,14 @@ pub type BoolExpr<C> = Node<bool, C, VarNode<bool, C>>;
 pub type StoredExpr<N, C> = Box<dyn Expr<N, C> + Send + Sync>;
 
 pub trait AsExpression<N, C: Context> {
-    type Target: Expr<N, C>;
+    type Target: Expr<N, C> + Send + Sync + 'static;
 
     fn as_expr(self) -> Self::Target;
 }
 
 impl<N, C: Context, E> AsExpression<N, C> for Node<N, C, E>
 where
-    E: Expr<N, C>,
+    E: Expr<N, C> + Send + Sync + 'static,
 {
     type Target = E;
 

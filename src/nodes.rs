@@ -1,3 +1,5 @@
+use std::any::TypeId;
+use std::collections::HashSet;
 use crate::expr::{Context, Expr};
 use num_traits::Num;
 use std::fmt;
@@ -93,10 +95,14 @@ impl<N, C: Context> Node<N, C, VarNode<N, C>> {
     }
 }
 
-impl<N, C: Context> Expr<N, C> for VarNode<N, C> {
+impl<N: 'static, C: Context + 'static> Expr<N, C> for VarNode<N, C> {
     #[inline(always)]
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
         (self.fetch_fn)(ctx)
+    }
+
+    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+        deps.insert(TypeId::of::<Self>());
     }
 }
 
@@ -162,6 +168,10 @@ where
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> To {
         let val = self.inner.eval(ctx);
         num_traits::cast(val).expect("Failed to cast numeric value")
+    }
+
+    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+        self.inner.get_dependencies(deps);
     }
 }
 

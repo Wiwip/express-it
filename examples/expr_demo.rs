@@ -1,3 +1,4 @@
+use bevy::ecs::world::EntityRefExcept;
 use bevy::prelude::*;
 use express_it::expr::{Context, Expr};
 use express_it::nodes::Var;
@@ -19,17 +20,20 @@ fn setup(mut commands: Commands) {
     ));
 }
 
-fn post_setup(query: Query<EntityRef, With<Health>>) {
+fn post_setup(query: Query<(EntityRef, EntityRefExcept<Health>), With<Health>>) {
     let player_health =
         Var::<f32, MyGameCtx>::new(|ctx| ctx.src.get::<Health>().map(|h| h.value).unwrap_or(0.0));
 
     let damage =
         Var::<f32, MyGameCtx>::new(|ctx| ctx.dst.get::<Damage>().map(|a| a.value).unwrap_or(0.0));
 
-    for entity in query.iter() {
+
+
+    for (entity_ref, entity_ref_except) in query.iter() {
         let ctx = BevyCtx {
-            src: entity,
-            dst: entity,
+            src: entity_ref,
+            dst: entity_ref,
+            val: entity_ref_except,
         };
 
         let expr = 25.0 + player_health * damage + 10.0 + -player_health;
@@ -68,7 +72,7 @@ fn post_setup(query: Query<EntityRef, With<Health>>) {
 }
 
 #[derive(Component)]
-struct Health {
+pub struct Health {
     value: f32,
 }
 
@@ -80,13 +84,14 @@ struct Damage {
 #[derive(Component)]
 struct UnsignedAttr(u32);
 
-pub struct BevyCtx<'w> {
+pub struct BevyCtx<'w ,'s> {
     pub src: EntityRef<'w>,
     pub dst: EntityRef<'w>,
+    pub val: EntityRefExcept<'w, 's, Health>,
 }
 
 pub struct MyGameCtx;
 
 impl Context for MyGameCtx {
-    type ContextItem<'w, 's> = BevyCtx<'w>;
+    type ContextItem<'w, 's> = BevyCtx<'w, 's>;
 }
