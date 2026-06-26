@@ -1,4 +1,4 @@
-use crate::expr::{Context, Expr};
+use crate::expr::{Context, ContextMut, Expr};
 use crate::nodes::CacheSaveStep;
 use std::any::Any;
 use std::collections::HashMap;
@@ -31,12 +31,12 @@ impl PlanCache {
 
 // ---------- StepExecutor ----------
 
-pub trait StepExecutor<C: Context>: Send + Sync {
+pub trait StepExecutor<C: ContextMut>: Send + Sync {
     /// Read-only: evaluate against current context + shared cache.
     fn evaluate(&self, ctx: &C::ContextItem<'_, '_>, cache: &PlanCache) -> Box<dyn Any>;
 
     /// Mutating: apply the previously computed value, then optionally enrich cache.
-    fn apply(&self, ctx: &mut C::ContextItem<'_, '_>, value: Box<dyn Any>, cache: &mut PlanCache);
+    fn apply(&self, ctx: &mut C::ContextItemMut<'_, '_>, value: Box<dyn Any>, cache: &mut PlanCache);
 }
 
 // ---------- Plan ----------
@@ -46,7 +46,7 @@ pub struct Plan<C: Context> {
     _marker: PhantomData<C>,
 }
 
-impl<C: Context> Plan<C> {
+impl<C: ContextMut> Plan<C> {
     pub fn new() -> Self {
         Self {
             steps: Vec::new(),
@@ -63,13 +63,13 @@ impl<C: Context> Plan<C> {
     }
 }
 
-impl<C: Context> Plan<C> {
+impl<C: ContextMut> Plan<C> {
     /// Sequential execute: evaluate → apply → mutate cache → next step.
     /// This lets step N read the writes + cache populated by step N-1.
-    pub fn run<'w, 's>(&self, ctx: &mut C::ContextItem<'w, 's>) {
+    pub fn run<'w, 's>(&self, ctx: &mut C::ContextItemMut<'w, 's>) {
         let mut cache = PlanCache::default();
         for step in &self.steps {
-            let value = step.evaluate(&*ctx, &cache);
+            let value = step.evaluate(&C::as_readonly(ctx), &cache);
             step.apply(ctx, value, &mut cache);
         }
     }
@@ -88,8 +88,8 @@ impl<N, C, E, S> StepExecutor<C> for AssignmentStep<N, E, S>
 where
     E: Expr<N, C> + Send + Sync,
     N: 'static + Clone + Send + Sync,
-    C: Context,
-    S: Fn(&mut C::ContextItem<'_, '_>, N) + 'static + Send + Sync,
+    C: ContextMut,
+    S: Fn(&mut C::ContextItemMut<'_, '_>, N) + 'static + Send + Sync,
 {
     fn evaluate(&self, ctx: &C::ContextItem<'_, '_>, _cache: &PlanCache) -> Box<dyn Any> {
         Box::new(self.expr.eval(ctx))
@@ -97,7 +97,7 @@ where
 
     fn apply(
         &self,
-        write_ctx: &mut C::ContextItem<'_, '_>,
+        write_ctx: &mut C::ContextItemMut<'_, '_>,
         value: Box<dyn Any>,
         cache: &mut PlanCache,
     ) {
@@ -113,20 +113,17 @@ where
 }
 
 // ---------- CacheSaveStep ----------
-
-// Definition lives in `nodes.rs` so `Node::alias()` can return it.
-
 impl<N, C, E> StepExecutor<C> for CacheSaveStep<N, C, E>
 where
     N: 'static + Clone + Send + Sync,
-    C: Context,
+    C: ContextMut,
     E: Expr<N, C> + Send + Sync,
 {
     fn evaluate(&self, ctx: &C::ContextItem<'_, '_>, _cache: &PlanCache) -> Box<dyn Any> {
         Box::new(self.expr.eval(ctx))
     }
 
-    fn apply(&self, _ctx: &mut C::ContextItem<'_, '_>, value: Box<dyn Any>, cache: &mut PlanCache) {
+    fn apply(&self, _ctx: &mut C::ContextItemMut<'_, '_>, value: Box<dyn Any>, cache: &mut PlanCache) {
         if let Ok(v) = value.downcast::<N>() {
             cache.set(self.key.to_string(), *v);
         }
@@ -203,7 +200,7 @@ where
     }
 }
 
-impl<V, C: Context> StepExecutor<C> for CacheLookupStep<V>
+impl<V, C: ContextMut> StepExecutor<C> for CacheLookupStep<V>
 where
     V: Clone + 'static + Send + Sync,
 {
@@ -218,7 +215,7 @@ where
 
     fn apply(
         &self,
-        _ctx: &mut C::ContextItem<'_, '_>,
+        _ctx: &mut C::ContextItemMut<'_, '_>,
         _value: Box<dyn Any>,
         _cache: &mut PlanCache,
     ) {
@@ -231,7 +228,7 @@ macro_rules! impl_step_executor_for_tuple {
         #[allow(non_snake_case)]
         impl<C, $($types),+> StepExecutor<C> for ($($types,)+)
         where
-            C: Context,
+            C: ContextMut,
             $($types: StepExecutor<C>,)+
         {
             fn evaluate(
@@ -249,7 +246,7 @@ macro_rules! impl_step_executor_for_tuple {
 
             fn apply(
                 &self,
-                ctx: &mut C::ContextItem<'_, '_>,
+                ctx: &mut C::ContextItemMut<'_, '_>,
                 value: Box<dyn Any>,
                 cache: &mut PlanCache,
             ) {

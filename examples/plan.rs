@@ -1,10 +1,10 @@
-use express_it::expr::Context;
+use express_it::expr::{Context, ContextMut};
 use express_it::nodes::Node;
 use express_it::plan::{CacheLookupStep, Plan, StepExecutor};
 use express_it::{load_cache, save, save_cache};
 use std::any::Any;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct CombatState {
     pub health: i32,
     pub max_health: i32,
@@ -16,6 +16,13 @@ pub struct CombatCtx;
 
 impl Context for CombatCtx {
     type ContextItem<'w, 's> = CombatState;
+}
+impl ContextMut for CombatCtx {
+    type ContextItemMut<'w, 's> = CombatState;
+
+    fn as_readonly<'w, 's, 'a>(mut_item: &'a Self::ContextItemMut<'w, 's>) -> Self::ContextItem<'w, 's> {
+        mut_item.clone()
+    }
 }
 
 fn main() {

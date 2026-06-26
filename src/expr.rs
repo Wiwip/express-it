@@ -6,6 +6,14 @@ pub trait Context: Send + Sync {
     type ContextItem<'w, 's>;
 }
 
+pub trait ContextMut: Context {
+    type ContextItemMut<'w, 's>;
+
+    fn as_readonly<'w, 's, 'a>(
+        mut_item: &'a Self::ContextItemMut<'w, 's>,
+    ) -> Self::ContextItem<'a, 's>;
+}
+
 pub trait Expr<N, C: Context> {
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N;
     fn get_dependencies(&self, _deps: &mut HashSet<TypeId>) {}
@@ -23,7 +31,7 @@ pub trait AsExpression<N, C: Context> {
 
 impl<N, C: Context, E> AsExpression<N, C> for Node<N, C, E>
 where
-    E: Expr<N, C> + Send + Sync + 'static,
+    E: Expr<N, C> + Clone + Send + Sync + 'static,
 {
     type Target = E;
 

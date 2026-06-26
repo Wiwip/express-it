@@ -33,7 +33,7 @@ impl<C: Context, L: Expr<bool, C> + Copy> ExprLogicNot for Node<bool, C, L> {
     fn not(self) -> Self::Output {
         Node {
             expr: LogicalNotNode { inner: self.expr },
-            _marker: std::marker::PhantomData,
+            _marker: PhantomData,
         }
     }
 }
@@ -264,6 +264,7 @@ mod tests {
     impl Context for MockEngine {
         // Using a reference to our player data struct as the runtime context item
         type ContextItem<'w, 's> = &'w MockPlayerData;
+        
     }
 
     // Helper to create a variable node cleanly in tests
