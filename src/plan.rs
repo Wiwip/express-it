@@ -36,7 +36,12 @@ pub trait StepExecutor<C: ContextMut>: Send + Sync {
     fn evaluate(&self, ctx: &C::ContextItem<'_, '_>, cache: &PlanCache) -> Box<dyn Any>;
 
     /// Mutating: apply the previously computed value, then optionally enrich cache.
-    fn apply(&self, ctx: &mut C::ContextItemMut<'_, '_>, value: Box<dyn Any>, cache: &mut PlanCache);
+    fn apply(
+        &self,
+        ctx: &mut C::ContextItemMut<'_, '_>,
+        value: Box<dyn Any>,
+        cache: &mut PlanCache,
+    );
 }
 
 // ---------- Plan ----------
@@ -123,7 +128,12 @@ where
         Box::new(self.expr.eval(ctx))
     }
 
-    fn apply(&self, _ctx: &mut C::ContextItemMut<'_, '_>, value: Box<dyn Any>, cache: &mut PlanCache) {
+    fn apply(
+        &self,
+        _ctx: &mut C::ContextItemMut<'_, '_>,
+        value: Box<dyn Any>,
+        cache: &mut PlanCache,
+    ) {
         if let Ok(v) = value.downcast::<N>() {
             cache.set(self.key.to_string(), *v);
         }

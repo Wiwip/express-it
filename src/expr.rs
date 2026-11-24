@@ -1,4 +1,4 @@
-use crate::nodes::{LiteralNode, Node, VarNode};
+use crate::nodes::{LiteralNode, Node, VarExpr};
 use std::any::TypeId;
 use std::collections::HashSet;
 
@@ -19,7 +19,7 @@ pub trait Expr<N, C: Context> {
     fn get_dependencies(&self, _deps: &mut HashSet<TypeId>) {}
 }
 
-pub type BoolExpr<C> = Node<bool, C, VarNode<bool, C>>;
+pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
 
 pub type StoredExpr<N, C> = Box<dyn Expr<N, C> + Send + Sync>;
 

@@ -27,8 +27,6 @@ fn post_setup(query: Query<(EntityRef, EntityRefExcept<Health>), With<Health>>) 
     let damage =
         Var::<f32, MyGameCtx>::new(|ctx| ctx.dst.get::<Damage>().map(|a| a.value).unwrap_or(0.0));
 
-
-
     for (entity_ref, entity_ref_except) in query.iter() {
         let ctx = BevyCtx {
             src: entity_ref,
@@ -84,7 +82,7 @@ struct Damage {
 #[derive(Component)]
 struct UnsignedAttr(u32);
 
-pub struct BevyCtx<'w ,'s> {
+pub struct BevyCtx<'w, 's> {
     pub src: EntityRef<'w>,
     pub dst: EntityRef<'w>,
     pub val: EntityRefExcept<'w, 's, Health>,

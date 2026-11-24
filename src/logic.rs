@@ -249,7 +249,7 @@ impl<C: Context> Expr<bool, C> for bool {
 mod tests {
     use crate::expr::{Context, Expr};
     use crate::logic::*;
-    use crate::nodes::{Node, VarNode};
+    use crate::nodes::{Node, VarExpr};
     use std::marker::PhantomData;
 
     // 1. Setup a Mock Context for the Engine to Evaluate Against
@@ -264,15 +264,14 @@ mod tests {
     impl Context for MockEngine {
         // Using a reference to our player data struct as the runtime context item
         type ContextItem<'w, 's> = &'w MockPlayerData;
-        
     }
 
     // Helper to create a variable node cleanly in tests
     fn var<N>(
         f: for<'a, 'w> fn(&'a &'w MockPlayerData) -> N,
-    ) -> Node<N, MockEngine, VarNode<N, MockEngine>> {
+    ) -> Node<N, MockEngine, VarExpr<N, MockEngine>> {
         Node {
-            expr: VarNode { fetch_fn: f },
+            expr: VarExpr { fetch_fn: f },
             _marker: PhantomData,
         }
     }

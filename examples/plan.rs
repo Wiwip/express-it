@@ -20,7 +20,9 @@ impl Context for CombatCtx {
 impl ContextMut for CombatCtx {
     type ContextItemMut<'w, 's> = CombatState;
 
-    fn as_readonly<'w, 's, 'a>(mut_item: &'a Self::ContextItemMut<'w, 's>) -> Self::ContextItem<'w, 's> {
+    fn as_readonly<'w, 's, 'a>(
+        mut_item: &'a Self::ContextItemMut<'w, 's>,
+    ) -> Self::ContextItem<'a, 's> {
         mut_item.clone()
     }
 }

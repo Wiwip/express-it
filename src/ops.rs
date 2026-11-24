@@ -408,7 +408,6 @@ mod tests {
 
     impl Context for Ctx {
         type ContextItem<'w, 's> = ();
-        
     }
 
     #[test]

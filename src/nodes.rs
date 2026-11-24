@@ -1,7 +1,7 @@
-use std::any::TypeId;
-use std::collections::HashSet;
 use crate::expr::{Context, Expr};
 use num_traits::Num;
+use std::any::TypeId;
+use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -71,13 +71,13 @@ pub struct CacheSaveStep<N: 'static, C: Context, E> {
     pub expr: Node<N, C, E>,
 }
 
-pub type Var<N, C> = Node<N, C, VarNode<N, C>>;
+pub type Var<N, C> = Node<N, C, VarExpr<N, C>>;
 
-pub struct VarNode<N, C: Context> {
+pub struct VarExpr<N, C: Context> {
     pub fetch_fn: for<'w, 's> fn(&C::ContextItem<'w, 's>) -> N,
 }
 
-impl<N, C: Context> Clone for VarNode<N, C> {
+impl<N, C: Context> Clone for VarExpr<N, C> {
     fn clone(&self) -> Self {
         Self {
             fetch_fn: self.fetch_fn,
@@ -85,17 +85,17 @@ impl<N, C: Context> Clone for VarNode<N, C> {
     }
 }
 
-impl<N, C: Context> Node<N, C, VarNode<N, C>> {
+impl<N, C: Context> Node<N, C, VarExpr<N, C>> {
     /// Constructs a variable node pre-wrapped for math operations
     pub fn new(fetch_fn: fn(&C::ContextItem<'_, '_>) -> N) -> Self {
         Node {
-            expr: VarNode { fetch_fn },
+            expr: VarExpr { fetch_fn },
             _marker: PhantomData,
         }
     }
 }
 
-impl<N: 'static, C: Context + 'static> Expr<N, C> for VarNode<N, C> {
+impl<N: 'static, C: Context + 'static> Expr<N, C> for VarExpr<N, C> {
     #[inline(always)]
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
         (self.fetch_fn)(ctx)
@@ -106,9 +106,9 @@ impl<N: 'static, C: Context + 'static> Expr<N, C> for VarNode<N, C> {
     }
 }
 
-impl<N, C: Context> Copy for VarNode<N, C> {}
+impl<N, C: Context> Copy for VarExpr<N, C> {}
 
-impl<N: fmt::Display, C: Context> fmt::Display for VarNode<N, C> {
+impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "var")
     }
@@ -190,7 +190,6 @@ mod tests {
 
     impl Context for Ctx {
         type ContextItem<'w, 's> = ();
-        
     }
 
     #[test]
