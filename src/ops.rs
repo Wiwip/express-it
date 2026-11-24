@@ -489,13 +489,13 @@ mod tests {
     #[test]
     fn test_unary_not_bool_true() {
         let t = Node::<bool, Ctx, _>::lit(true);
-        assert_eq!((!t).eval(&()), false);
+        assert!(!(!t).eval(&()));
     }
 
     #[test]
     fn test_unary_not_bool_false() {
         let f = Node::<bool, Ctx, _>::lit(false);
-        assert_eq!((!f).eval(&()), true);
+        assert!((!f).eval(&()));
     }
 
     #[test]
@@ -565,10 +565,10 @@ mod tests {
     fn test_logical_ops_short_circuit_style() {
         let t = Node::<bool, Ctx, _>::lit(true);
         let f = Node::<bool, Ctx, _>::lit(false);
-        assert_eq!(t.and(f).eval(&()), false);
-        assert_eq!(t.and(t).eval(&()), true);
-        assert_eq!(f.or(t).eval(&()), true);
-        assert_eq!(f.or(f).eval(&()), false);
+        assert!(!t.and(f).eval(&()));
+        assert!(t.and(t).eval(&()));
+        assert!(f.or(t).eval(&()));
+        assert!(!f.or(f).eval(&()));
     }
 
     #[test]

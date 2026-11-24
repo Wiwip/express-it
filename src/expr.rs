@@ -45,6 +45,13 @@ pub type StoredExpr<N, C> = Box<dyn Expr<N, C> + Send + Sync>;
 pub trait AsExpression<N, C: Context> {
     type Target: Expr<N, C> + Send + Sync + 'static;
 
+    /// Consumes the wrapper and hands back the expression it holds.
+    ///
+    /// Named `as_expr` rather than `into_expr` because it takes `self` by value:
+    /// `Node` is a zero-cost builder wrapper, so stripping it is a free cast, and
+    /// every operator already hands back a fresh `Node` that cannot be borrowed
+    /// past this point. Not an `as_` reference cast, hence the allow.
+    #[allow(clippy::wrong_self_convention)]
     fn as_expr(self) -> Self::Target;
 }
 
@@ -99,8 +106,8 @@ mod tests {
 
     #[test]
     fn test_as_expression_primitives() {
-        let f: LiteralNode<f32> = AsExpression::<f32, Ctx>::as_expr(3.14f32);
-        assert_eq!(f.value, 3.14);
+        let f: LiteralNode<f32> = AsExpression::<f32, Ctx>::as_expr(2.75f32);
+        assert_eq!(f.value, 2.75);
 
         let i: LiteralNode<i32> = AsExpression::<i32, Ctx>::as_expr(-42i32);
         assert_eq!(i.value, -42);

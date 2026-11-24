@@ -68,6 +68,12 @@ impl<C: ContextMut> Plan<C> {
     }
 }
 
+impl<C: ContextMut> Default for Plan<C> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<C: ContextMut> Plan<C> {
     /// Sequential execute: evaluate → apply → mutate cache → next step.
     /// This lets step N read the writes + cache populated by step N-1.

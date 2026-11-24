@@ -23,7 +23,7 @@ impl ContextMut for CombatCtx {
     fn as_readonly<'w, 's, 'a>(
         mut_item: &'a Self::ContextItemMut<'w, 's>,
     ) -> Self::ContextItem<'a, 's> {
-        mut_item.clone()
+        *mut_item
     }
 }
 

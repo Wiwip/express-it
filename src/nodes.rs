@@ -84,9 +84,7 @@ pub struct VarExpr<N, C: Context> {
 
 impl<N, C: Context> Clone for VarExpr<N, C> {
     fn clone(&self) -> Self {
-        Self {
-            fetch_fn: self.fetch_fn,
-        }
+        *self
     }
 }
 

@@ -51,7 +51,7 @@ pub(crate) mod dep_probe {
 
     impl<A: Attribute> Clone for Probe<A> {
         fn clone(&self) -> Self {
-            Probe(PhantomData)
+            *self
         }
     }
 
