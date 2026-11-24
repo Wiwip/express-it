@@ -1,5 +1,7 @@
 use crate::expr::{AsExpression, Context, Expr};
 use crate::nodes::Node;
+use std::any::TypeId;
+use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -12,6 +14,10 @@ impl<C: Context, E: Expr<bool, C>> Expr<bool, C> for LogicalNotNode<E> {
     #[inline(always)]
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> bool {
         !self.inner.eval(ctx)
+    }
+
+    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+        self.inner.get_dependencies(deps);
     }
 }
 
@@ -55,6 +61,11 @@ macro_rules! impl_cmp_method {
             #[inline(always)]
             fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> bool {
                 self.lhs.eval(ctx) $operator self.rhs.eval(ctx)
+            }
+
+            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+                self.lhs.get_dependencies(deps);
+                self.rhs.get_dependencies(deps);
             }
         }
 
@@ -118,6 +129,11 @@ macro_rules! impl_logical_method {
             fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> bool {
                 self.lhs.eval(ctx) $operator self.rhs.eval(ctx)
             }
+
+            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+                self.lhs.get_dependencies(deps);
+                self.rhs.get_dependencies(deps);
+            }
         }
 
         impl<L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<L, R> {
@@ -175,6 +191,11 @@ macro_rules! impl_neg_logical_method {
             #[inline(always)]
             fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> bool {
                 !(self.lhs.eval(ctx) $operator self.rhs.eval(ctx))
+            }
+
+            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+                self.lhs.get_dependencies(deps);
+                self.rhs.get_dependencies(deps);
             }
         }
 
@@ -247,6 +268,7 @@ impl<C: Context> Expr<bool, C> for bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::dep_probe::{Attack, Defense, Haste, ProbeCtx, Speed, attr, key, keys, set};
     use crate::expr::{Context, Expr};
     use crate::logic::*;
     use crate::nodes::{Node, VarExpr};
@@ -486,5 +508,77 @@ mod tests {
 
         let any_check = any![cond1, cond2, cond3];
         assert!(!any_check.eval(&&ctx_data));
+    }
+
+    #[test]
+    fn comparison_nodes_report_both_sides() {
+        assert_eq!(
+            keys(&attr::<Attack>().gt(attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+        assert_eq!(keys(&attr::<Attack>().lt(5.0)), set([key::<Attack>()]));
+        assert_eq!(
+            keys(&attr::<Attack>().gt(5.0).not()),
+            set([key::<Attack>()]),
+            "logical not forwards to its operand"
+        );
+    }
+
+    #[test]
+    fn and_reports_both_operands_even_when_eval_short_circuits() {
+        // (Attack < 0) && (Haste < Speed). Attack is 10.0, so eval short-circuits
+        // and never reads Haste or Speed; the walk reports them anyway, which is
+        // the may-read superset documented on Expr::get_dependencies.
+        let cond = attr::<Attack>()
+            .lt(0.0)
+            .and(attr::<Haste>().lt(attr::<Speed>()));
+
+        assert!(
+            !cond.eval(&()),
+            "the left operand is false, so eval short-circuits"
+        );
+        assert_eq!(
+            keys(&cond),
+            set([key::<Attack>(), key::<Haste>(), key::<Speed>()]),
+            "a short-circuited right operand is still reported"
+        );
+    }
+
+    #[test]
+    fn a_conjunction_reports_all_four_of_its_operands() {
+        let cond = attr::<Attack>()
+            .gt(attr::<Defense>())
+            .and(attr::<Haste>().lt(attr::<Speed>()));
+
+        assert!(cond.eval(&()));
+        assert_eq!(
+            keys(&cond),
+            set([
+                key::<Attack>(),
+                key::<Defense>(),
+                key::<Haste>(),
+                key::<Speed>()
+            ])
+        );
+    }
+
+    #[test]
+    fn every_boolean_combinator_forwards_to_both_operands() {
+        let lhs = || attr::<Attack>().gt(5.0);
+        let rhs = || attr::<Defense>().lt(50.0);
+        let expected = set([key::<Attack>(), key::<Defense>()]);
+
+        assert_eq!(keys(&lhs().and(rhs())), expected);
+        assert_eq!(keys(&lhs().or(rhs())), expected);
+        assert_eq!(keys(&lhs().xor(rhs())), expected);
+        assert_eq!(keys(&lhs().nand(rhs())), expected);
+        assert_eq!(keys(&lhs().nor(rhs())), expected);
+        assert_eq!(keys(&lhs().nxor(rhs())), expected);
+    }
+
+    #[test]
+    fn boolean_literals_report_no_dependencies() {
+        let cond = Node::<bool, ProbeCtx, _>::lit(true).and(Node::<bool, ProbeCtx, _>::lit(false));
+        assert!(keys(&cond).is_empty());
     }
 }

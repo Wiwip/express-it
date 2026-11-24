@@ -16,6 +16,25 @@ pub trait ContextMut: Context {
 
 pub trait Expr<N, C: Context> {
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N;
+
+    /// Collects the dependency keys of every leaf reachable from this node.
+    ///
+    /// The result is a **may-read superset**, not the set of attributes a given
+    /// evaluation actually touches: the walk visits every child of every node,
+    /// while `eval` may skip some of them. `&&` and `||` are the case that
+    /// matters — `a && b` reports both operands even though a live `eval`
+    /// short-circuits and never reads `b` once `a` is false. Arithmetic is exact
+    /// by contrast, since every arithmetic node (`+ - * / %`, `powf`, `min`,
+    /// `max`, `abs`, `sqrt`, `clamp(..)`, casts) evaluates all of its children.
+    /// Watching a leaf that a particular evaluation skipped only costs a
+    /// redundant re-evaluation, so the superset is a documented property rather
+    /// than a defect, and callers get a conservative answer they can register
+    /// edges from ahead of the first evaluation.
+    ///
+    /// Leaf identity is up to the leaf: the default implementation contributes
+    /// nothing, which is correct for nodes that hold no variables (a literal).
+    /// Order is unspecified — the sink is a `HashSet`, so a caller that depends
+    /// on a particular order must sort the collected keys.
     fn get_dependencies(&self, _deps: &mut HashSet<TypeId>) {}
 }
 

@@ -2,6 +2,8 @@ use crate::expr::{Context, Expr};
 use crate::nodes::LiteralNode;
 use crate::nodes::Node;
 use num_traits::{Float, Num};
+use std::any::TypeId;
+use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -21,6 +23,11 @@ macro_rules! impl_binary_op {
             #[inline(always)]
             fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
                 self.lhs.eval(ctx) $op self.rhs.eval(ctx)
+            }
+
+            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+                self.lhs.get_dependencies(deps);
+                self.rhs.get_dependencies(deps);
             }
         }
 
@@ -136,6 +143,10 @@ macro_rules! impl_unary_op {
             fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
                 $op self.expr.eval(ctx)
             }
+
+            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+                self.expr.get_dependencies(deps);
+            }
         }
 
         impl<E: fmt::Display> fmt::Display for $node_name<E> {
@@ -184,6 +195,11 @@ macro_rules! impl_binary_method {
             #[inline(always)]
             fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
                 self.lhs.eval(ctx).$method_name(self.rhs.eval(ctx))
+            }
+
+            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+                self.lhs.get_dependencies(deps);
+                self.rhs.get_dependencies(deps);
             }
         }
 
@@ -267,6 +283,10 @@ macro_rules! impl_unary_method {
             fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
                 self.expr.eval(ctx).$method_name()
             }
+
+            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+                self.expr.get_dependencies(deps);
+            }
         }
 
         impl<E: fmt::Display> fmt::Display for $node_name<E> {
@@ -324,6 +344,12 @@ macro_rules! impl_trinary_method {
                 self.expr
                     .eval(ctx)
                     .$method_name(self.arg1.eval(ctx), self.arg2.eval(ctx))
+            }
+
+            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+                self.expr.get_dependencies(deps);
+                self.arg1.get_dependencies(deps);
+                self.arg2.get_dependencies(deps);
             }
         }
 
@@ -400,7 +426,8 @@ impl_trinary_method!(ExprClamp, clamp, FloatClampNode, Float);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::expr::{Context, Expr};
+    use crate::dep_probe::{Attack, Defense, Haste, ProbeCtx, attr, key, keys, set};
+    use crate::expr::{AsExpression, Context, Expr};
     use crate::logic::{ExprCmpGe, ExprLogicalAnd, ExprLogicalOr};
     use crate::nodes::Node;
 
@@ -796,5 +823,96 @@ mod tests {
         assert!(branch1.eval(&()));
         assert!(branch2.eval(&()));
         assert!(branch3.eval(&()));
+    }
+
+    #[test]
+    fn composite_expression_reports_every_leaf() {
+        let root = (attr::<Attack>() + attr::<Defense>()) * attr::<Haste>();
+        let expected = set([key::<Attack>(), key::<Defense>(), key::<Haste>()]);
+
+        assert_eq!(keys(&root), expected);
+        assert_eq!(
+            keys(&root.as_expr()),
+            expected,
+            "as_expr() strips the Node wrapper but keeps the same keys"
+        );
+        assert_eq!(
+            root.eval(&()),
+            36.0,
+            "reporting must not disturb evaluation"
+        );
+    }
+
+    #[test]
+    fn arithmetic_nodes_forward_to_every_child() {
+        assert_eq!(
+            keys(&(attr::<Attack>() + attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+        assert_eq!(
+            keys(&(attr::<Attack>() - attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+        assert_eq!(
+            keys(&(attr::<Attack>() * attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+        assert_eq!(
+            keys(&(attr::<Attack>() / attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+        assert_eq!(
+            keys(&(attr::<Attack>() % attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+
+        assert_eq!(keys(&(-attr::<Attack>())), set([key::<Attack>()]));
+
+        // Literal on the left of the operator (10.0 * expr).
+        assert_eq!(keys(&(10.0f32 * attr::<Attack>())), set([key::<Attack>()]));
+    }
+
+    #[test]
+    fn method_nodes_forward_to_every_child() {
+        assert_eq!(
+            keys(&attr::<Attack>().powf(attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+        assert_eq!(
+            keys(&attr::<Attack>().min(attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+        assert_eq!(
+            keys(&attr::<Attack>().max(attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+
+        assert_eq!(keys(&attr::<Attack>().abs()), set([key::<Attack>()]));
+        assert_eq!(keys(&attr::<Attack>().sqrt()), set([key::<Attack>()]));
+
+        // clamp(expr, expr, expr): all three operands are read.
+        assert_eq!(
+            keys(&attr::<Attack>().clamp(attr::<Defense>(), attr::<Haste>())),
+            set([key::<Attack>(), key::<Defense>(), key::<Haste>()])
+        );
+        // clamp(expr, literal, literal): only the value being clamped is a dependency.
+        assert_eq!(
+            keys(&attr::<Attack>().clamp(0.0, 100.0)),
+            set([key::<Attack>()])
+        );
+    }
+
+    #[test]
+    fn cast_forwards_and_literals_report_nothing() {
+        assert_eq!(
+            keys(&attr::<Attack>().cast::<i32>()),
+            set([key::<Attack>()])
+        );
+
+        let literals_only = Node::<f32, ProbeCtx, _>::lit(2.0) + 3.0;
+        assert!(
+            keys(&literals_only).is_empty(),
+            "a tree with no variables must report no dependencies"
+        );
     }
 }

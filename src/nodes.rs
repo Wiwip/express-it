@@ -55,6 +55,11 @@ where
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
         self.expr.eval(ctx)
     }
+
+    #[inline(always)]
+    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+        self.expr.get_dependencies(deps);
+    }
 }
 
 impl<N: fmt::Display, C: Context, E: Expr<N, C> + fmt::Display> fmt::Display for Node<N, C, E> {
@@ -101,6 +106,11 @@ impl<N: 'static, C: Context + 'static> Expr<N, C> for VarExpr<N, C> {
         (self.fetch_fn)(ctx)
     }
 
+    /// Reports the key of this variable. Note that the key is the identity of
+    /// `VarExpr<N, C>` itself, so every variable built through [`Node::new`] with
+    /// the same value type and the same context shares a single key. A leaf that
+    /// needs per-variable identity carries its own key instead, which is what a
+    /// custom `Expr` leaf does when it wraps `Node` as its `E` parameter.
     fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
         deps.insert(TypeId::of::<Self>());
     }
@@ -250,5 +260,32 @@ mod tests {
         let node = CastNode::<i64, i8, Ctx, _>::new(inner);
         let result = std::panic::catch_unwind(|| node.eval(&()));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn node_wrapper_forwards_dependencies_to_inner_expr() {
+        use crate::dep_probe::{Attack, Defense, Haste, attr, key, keys, set};
+
+        assert_eq!(
+            keys(&(attr::<Attack>() + attr::<Defense>())),
+            set([key::<Attack>(), key::<Defense>()])
+        );
+        assert_eq!(keys(&attr::<Haste>()), set([key::<Haste>()]));
+    }
+
+    #[test]
+    fn vars_built_through_node_new_share_one_key() {
+        // Documented limitation: VarExpr reports the identity of VarExpr<N, C>,
+        // not of the variable, so two different variables of one value type and
+        // one context collapse to a single key. Pinned so that giving variables
+        // their own key has to change this test on purpose.
+        let attack: Node<f32, Ctx, _> = Node::new(|()| 10.0f32);
+        let defense: Node<f32, Ctx, _> = Node::new(|()| 2.0f32);
+
+        let mut deps = HashSet::new();
+        attack.get_dependencies(&mut deps);
+        defense.get_dependencies(&mut deps);
+
+        assert_eq!(deps.len(), 1, "both variables report the same VarExpr key");
     }
 }
