@@ -1,0 +1,4 @@
+# Pi sandbox flags (applied only after `agent-sandbox --trust` records this hash).
+# Deliberately absent: --git, --cargo, --network. Pi never commits; /commit is
+# owner-started with `pi --git`. Builds offline on the host toolchain + shared
+# sccache; crates.io is not whitelisted.
