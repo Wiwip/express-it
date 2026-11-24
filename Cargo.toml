@@ -7,5 +7,5 @@ edition = "2024"
 num-traits = "0.2"
 
 [dev-dependencies]
-bevy = "0.19"
+bevy = "0.20"
 criterion = "0.8"
