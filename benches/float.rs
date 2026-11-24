@@ -1,143 +1,147 @@
-use std::any::Any;
+//! Float evaluation: literals, variables, unary and binary nodes, a plain Rust
+//! addition as the floor they are measured against, and the dependency walk.
+use criterion::{Criterion, criterion_group, criterion_main};
+use express_it::expr::{Context, Expr};
+use express_it::nodes::{Node, VarExpr};
+use express_it::ops::{ExprAbs, ExprSqrt};
+use std::any::TypeId;
+use std::collections::HashSet;
 use std::hint::black_box;
-use std::sync::Arc;
+use std::marker::PhantomData;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+#[derive(Clone, Copy)]
+struct State {
+    atk: f32,
+    def: f32,
+}
 
-use express_it::context::ReadContext;
-use express_it::float::{FloatBinaryOp, FloatExprNode, FloatUnaryOp};
-use express_it::{
-    context::Path,
-    expr::{Expr, ExprSchema, ExpressionError},
+struct Ctx;
+
+impl Context for Ctx {
+    type ContextItem<'w, 's> = State;
+}
+
+const STATE: State = State {
+    atk: 10.0,
+    def: 3.0,
 };
 
-struct BenchSchema;
-impl ExprSchema for BenchSchema {
-    type Context<'w, 's>
-        = BenchContext
-    where
-        's: 'w;
+fn atk() -> Node<f32, Ctx, VarExpr<f32, Ctx>> {
+    Node::new(|ctx: &State| ctx.atk)
 }
 
-#[derive(Default)]
-struct BenchContext {
-    atk: Option<Box<f32>>,
-    def: Option<Box<f32>>,
+fn def() -> Node<f32, Ctx, VarExpr<f32, Ctx>> {
+    Node::new(|ctx: &State| ctx.def)
 }
 
-impl ReadContext for BenchContext {
-    fn get_any(&self, path: &Path) -> Result<&dyn Any, ExpressionError> {
-        if path.as_str().contains("Atk") {
-            self.atk
-                .as_ref()
-                .map(|v| v.as_ref() as &dyn Any)
-                .ok_or(ExpressionError::MissingValue)
-        } else {
-            self.def
-                .as_ref()
-                .map(|v| v.as_ref() as &dyn Any)
-                .ok_or(ExpressionError::MissingValue)
-        }
-    }
-}
-
-fn build_add_expr() -> Expr<f32, BenchSchema> {
-    let lhs = Assignment {
-        path: Path::new("src.Atk.val"),
-        expr: Expr::new(Arc::new(FloatExprNode::Lit(10.0))),
-    };
-    let rhs = Assignment {
-        path: Path::new("src.Def.val"),
-        expr: Expr::new(Arc::new(FloatExprNode::Lit(3.0))),
-    };
-
-    Expr::new(Arc::new(FloatExprNode::BinaryOp {
-        lhs_expr: lhs.expr,
-        op: FloatBinaryOp::Add,
-        rhs_expr: rhs.expr,
-    }))
-}
-
-fn bench_float_binary_add(c: &mut Criterion) {
-    let mut group = c.benchmark_group("float_binary");
-    group.measurement_time(std::time::Duration::from_secs(10));
-
-    let expr = build_add_expr();
-    let ctx = BenchContext {
-        atk: Some(Box::new(10.0)),
-        def: Some(Box::new(3.0)),
-    };
-
-    group.bench_function("add", |b| b.iter(|| black_box(expr.eval(&ctx)).unwrap()));
-
-    group.finish();
-}
-
-use express_it::frame::Assignment;
-
-fn bench_float_add_pure(c: &mut Criterion) {
-    let mut group = c.benchmark_group("float_add_pure");
-    group.measurement_time(std::time::Duration::from_secs(10));
-
-    group.bench_function("add", |b| b.iter(|| black_box(10.0_f32 + 3.0_f32)));
-
-    group.finish();
-}
-
-fn bench_float_lit(c: &mut Criterion) {
-    let ctx = BenchContext::default();
-    let expr: Expr<f32, BenchSchema> =
-        Expr::new(black_box(std::sync::Arc::new(FloatExprNode::Lit(42.0))));
+fn bench_literal(c: &mut Criterion) {
+    let expr = Node::<f32, Ctx, _>::lit(42.0);
 
     c.bench_function("float_literal_eval", |b| {
-        b.iter(|| black_box(expr.eval(&ctx)).unwrap())
+        b.iter(|| black_box(expr.eval(&STATE)));
     });
 }
 
-fn bench_float_unary(c: &mut Criterion) {
+fn bench_var(c: &mut Criterion) {
+    let expr = atk();
+
+    c.bench_function("float_var_eval", |b| {
+        b.iter(|| black_box(expr.eval(&STATE)));
+    });
+}
+
+fn bench_unary(c: &mut Criterion) {
+    let neg = -Node::<f32, Ctx, _>::lit(9.0);
+    let abs = Node::<f32, Ctx, _>::lit(-9.0).abs();
+    let sqrt = Node::<f32, Ctx, _>::lit(9.0).sqrt();
+
     let mut group = c.benchmark_group("float_unary");
+    group.bench_function("neg", |b| {
+        b.iter(|| black_box(neg.eval(&STATE)));
+    });
+    group.bench_function("abs", |b| {
+        b.iter(|| black_box(abs.eval(&STATE)));
+    });
+    group.bench_function("sqrt", |b| {
+        b.iter(|| black_box(sqrt.eval(&STATE)));
+    });
+    group.finish();
+}
 
-    let cases = [
-        ("lit_neg", {
-            let expr: Expr<f32, BenchSchema> = Expr::new(Arc::new(FloatExprNode::UnaryOp {
-                op: FloatUnaryOp::Neg,
-                expr: Expr::new(Arc::new(FloatExprNode::Lit(9.0))),
-            }));
-            let ctx = BenchContext::default();
-            (expr, ctx)
-        }),
-        ("lit_abs", {
-            let expr: Expr<f32, BenchSchema> = Expr::new(Arc::new(FloatExprNode::UnaryOp {
-                op: FloatUnaryOp::Abs,
-                expr: Expr::new(Arc::new(FloatExprNode::Lit(9.0))),
-            }));
-            let ctx = BenchContext::default();
-            (expr, ctx)
-        }),
-        ("lit_sqrt", {
-            let expr: Expr<f32, BenchSchema> = Expr::new(Arc::new(FloatExprNode::UnaryOp {
-                op: FloatUnaryOp::Sqrt,
-                expr: Expr::new(Arc::new(FloatExprNode::Lit(9.0))),
-            }));
-            let ctx = BenchContext::default();
-            (expr, ctx)
-        }),
-    ];
+fn bench_binary(c: &mut Criterion) {
+    let expr = atk() + def();
 
-    for (name, (expr, ctx)) in cases {
-        group.bench_with_input(BenchmarkId::from_parameter(name), &(), |b, _| {
-            b.iter(|| black_box(expr.eval(&ctx)).unwrap())
-        });
+    let mut group = c.benchmark_group("float_add");
+    group.bench_function("var_plus_var", |b| {
+        b.iter(|| black_box(expr.eval(&STATE)));
+    });
+    group.bench_function("plain_rust_add", |b| {
+        b.iter(|| black_box(black_box(10.0_f32) + black_box(3.0_f32)));
+    });
+    group.finish();
+}
+
+/// A leaf that reports a key of its own, the shape a consumer uses when its
+/// variables need per-attribute identity.
+struct Leaf<K>(PhantomData<K>);
+
+impl<K: 'static> Clone for Leaf<K> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<K: 'static> Copy for Leaf<K> {}
+
+impl<K: 'static, C: Context> Expr<f32, C> for Leaf<K> {
+    fn eval(&self, _ctx: &C::ContextItem<'_, '_>) -> f32 {
+        1.0
     }
 
+    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+        deps.insert(TypeId::of::<K>());
+    }
+}
+
+struct Attack;
+struct Defense;
+struct Haste;
+
+fn leaf<K: 'static>() -> Node<f32, Ctx, Leaf<K>> {
+    Node {
+        expr: Leaf(PhantomData),
+        _marker: PhantomData,
+    }
+}
+
+fn bench_dependency_walk(c: &mut Criterion) {
+    let expr = (leaf::<Attack>() + leaf::<Defense>()) * leaf::<Haste>();
+
+    let mut group = c.benchmark_group("get_dependencies");
+    group.bench_function("three_leaves", |b| {
+        b.iter(|| {
+            let mut deps = HashSet::new();
+            expr.get_dependencies(&mut deps);
+            black_box(deps.len());
+        });
+    });
+    group.bench_function("empty_sink_reuse", |b| {
+        let mut deps = HashSet::new();
+        b.iter(|| {
+            deps.clear();
+            expr.get_dependencies(&mut deps);
+            black_box(deps.len());
+        });
+    });
     group.finish();
 }
 
 criterion_group!(
     float_benches,
-    bench_float_add_pure,
-    bench_float_lit,
-    bench_float_unary,
-    bench_float_binary_add,
+    bench_literal,
+    bench_var,
+    bench_unary,
+    bench_binary,
+    bench_dependency_walk
 );
 criterion_main!(float_benches);
