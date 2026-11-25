@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep the registry index and crate cache warm between jobs.
+  CARGO_NET_RETRY: "3"
+
+permissions:
+  contents: read
+
+jobs:
+  style:
+    name: Format and lints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }}, ${{ matrix.toolchain }})
+    needs: style
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        toolchain: [stable]
+        include:
+          # The crate claims `rust-version = "1.85"` (the edition-2024 floor), so
+          # exactly that toolchain has to build and pass, not just current stable.
+          - os: ubuntu-latest
+            toolchain: "1.85.0"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (including tests, benches and examples)
+        run: cargo build --all-targets --all-features
+
+      - name: Tests
+        run: cargo test --all-features
+
+      - name: Tests, release profile
+        run: cargo test --release --all-features
+
+      # The generated cases are cheap, so one job pays for a deeper sweep than
+      # the default 300: an arithmetic or dependency-propagation bug that needs a
+      # particular bit pattern is unlikely to show at 300 cases.
+      - name: Deeper property sweep
+        if: matrix.os == 'ubuntu-latest' && matrix.toolchain == 'stable'
+        env:
+          PROPTEST_CASES: "2000"
+        run: cargo test --release --test properties
+
+      # The four benches are `harness = false` (criterion); compiling them catches
+      # a bench that drifted from the library without spending a benchmark run.
+      - name: Benches compile
+        run: cargo bench --no-run
+
+  docs:
+    name: Documentation
+    needs: style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rustdoc, warnings are errors
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --all-features
+
+      - name: Doctests
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo test --doc --all-features
+
+  package:
+    name: Packaging
+    needs: style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify the crate builds as a package and licence files ship
+        run: cargo package --list
+
+      # Publishability without uploading: this is the check that a missing
+      # `license` field, a broken `readme` path or a stray `include` list fails.
+      - name: Publish dry run
+        run: cargo publish --dry-run
