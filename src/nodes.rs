@@ -7,10 +7,10 @@ use std::marker::PhantomData;
 
 pub struct Node<N, C, E> {
     pub expr: E,
-    /// Carries the `N` and `C` parameters, which the struct otherwise would not
-    /// mention. Hidden from the docs rather than private: the field stays `pub`,
-    /// so a `Node { expr, _marker }` literal written before [`Node::from_expr`]
-    /// existed keeps compiling, while `from_expr` is the route the docs show.
+    // Carries the `N` and `C` parameters, which the struct otherwise would not
+    // mention. Deliberately `pub` and `#[doc(hidden)]` rather than private — see
+    // [`Node::from_expr`], whose doc comment carries the whole reason, and
+    // `tests/public_marker.rs`, which pins it from a separate crate.
     #[doc(hidden)]
     pub _marker: PhantomData<(N, C)>,
 }
@@ -21,7 +21,7 @@ impl<N: 'static + Clone, C: Context, E: Expr<N, C>> Node<N, C, E> {
     }
 }
 
-impl<N, C: Context, E> Node<N, C, E> {
+impl<N, C, E> Node<N, C, E> {
     /// Builds a node from a leaf supplied by the caller.
     ///
     /// `E` is the node's own shape, so a leaf of your own becomes a node here:
@@ -31,9 +31,20 @@ impl<N, C: Context, E> Node<N, C, E> {
     /// only way to supply one. [`var_leaf!`](crate::var_leaf) generates such a
     /// leaf for one attribute.
     ///
-    /// No `E: Expr<N, C>` bound: the constructor only stores the leaf, and every
-    /// way of using the node — `eval`, the operators, `Display` — asks for that
-    /// bound itself.
+    /// No bounds on `N`, `C`, or `E`: the constructor only stores the leaf, and
+    /// every way of using the node — `eval`, the operators, `Display` — asks for
+    /// the bound it needs itself. That is what makes this the constructor the
+    /// crate can always reach: `impl Clone for Node` has no `C: Context` in
+    /// scope, and builds through here.
+    ///
+    /// **Why `_marker` is still `pub`.** This is the only reason the field is
+    /// public: a `Node { expr, _marker }` literal written before this constructor
+    /// existed keeps compiling. The field is `#[doc(hidden)]`, so the rendered
+    /// docs show only `expr` and never advertise it — build through `from_expr`
+    /// rather than writing the literal in new code. The compatibility promise is
+    /// pinned by `tests/public_marker.rs`, which writes the literal from a
+    /// separate crate, so making the field private fails that test instead of
+    /// passing unnoticed.
     #[inline(always)]
     pub fn from_expr(expr: E) -> Self {
         Self {
@@ -46,19 +57,15 @@ impl<N, C: Context, E> Node<N, C, E> {
 impl<N, C: Context> Node<N, C, LiteralNode<N>> {
     #[inline(always)]
     pub fn lit(value: N) -> Self {
-        Self {
-            expr: LiteralNode { value },
-            _marker: PhantomData,
-        }
+        Self::from_expr(LiteralNode { value })
     }
 }
 
 impl<N, C, E: Clone> Clone for Node<N, C, E> {
     fn clone(&self) -> Self {
-        Node {
-            expr: self.expr.clone(),
-            _marker: PhantomData,
-        }
+        // `from_expr` rather than a literal: this impl has no `C: Context` in
+        // scope, and the constructor asks for no bounds.
+        Self::from_expr(self.expr.clone())
     }
 }
 
@@ -78,10 +85,9 @@ impl<N: Num, C: Context, E: Expr<N, C>> Node<N, C, E> {
     where
         N: AsCast<To>,
     {
-        Node {
-            expr: CastNode::new(self.expr),
-            _marker: PhantomData,
-        }
+        // Qualified rather than `Self::` — `cast` returns a node of a different
+        // `N` and `E` than the impl's `Self`.
+        Node::<To, C, _>::from_expr(CastNode::new(self.expr))
     }
 }
 
@@ -143,10 +149,7 @@ impl<N, C: Context> Clone for VarExpr<N, C> {
 impl<N, C: Context> Node<N, C, VarExpr<N, C>> {
     /// Constructs a variable node pre-wrapped for math operations
     pub fn new(fetch_fn: fn(&C::ContextItem<'_, '_>) -> N) -> Self {
-        Node {
-            expr: VarExpr { fetch_fn },
-            _marker: PhantomData,
-        }
+        Self::from_expr(VarExpr { fetch_fn })
     }
 }
 
@@ -185,19 +188,93 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 ///
 /// Why a type per attribute rather than a closure: a variable built with
 /// [`Node::new`] reports the key of `VarExpr<N, C>`, so every variable of one
-/// value type and one context shares a single key and cannot be told apart. A
-/// leaf that reports `TypeId::of::<Self>()` gives the attribute its own key, and
-/// that is the only way to get per-attribute identity out of
-/// [`Expr::get_dependencies`](crate::expr::Expr::get_dependencies) without
-/// changing it.
+/// value type and one context shares a single key and cannot be told apart. What
+/// [`Expr::get_dependencies`](crate::expr::Expr::get_dependencies) needs is a key
+/// that distinguishes the leaf, and a leaf can get one either way: a per-attribute
+/// type reports `TypeId::of::<Self>()`, and a single generic leaf parameterized
+/// per attribute reports the key of its type parameter instead — the shape this
+/// crate's own test leaf `dep_probe::Probe<A>` uses, and the one
+/// `benches/float.rs` writes by hand as `Leaf<K>`. The macro chooses the first
+/// shape because it costs the caller nothing: one call produces the item, the
+/// `Expr` impl, and the `Display` name, where writing them out is three items.
+/// That is the whole advantage. A hand-written leaf of either shape behaves
+/// identically once written, carries the same keys, and goes into
+/// [`Node::from_expr`] the same way.
+///
+/// # Attributes on the generated item
+///
+/// A slot for attributes sits ahead of the name, inside the parentheses, and what
+/// is written there is attached to the generated struct. That is how a crate under
+/// `#![deny(missing_docs)]` documents an item it never wrote by hand — without an
+/// attribute such a crate fails on the generated struct with `missing
+/// documentation for a struct`:
+///
+/// ```
+/// # use express_it::prelude::*;
+/// # struct Stats { hp: f32 }
+/// # struct GameCtx;
+/// # impl Context for GameCtx { type ContextItem<'w, 's> = Stats; }
+/// var_leaf!(
+///     #[doc = "The target's current hit points."]
+///     Health,
+///     f32,
+///     GameCtx,
+///     |ctx| ctx.hp
+/// );
+///
+/// let node = Node::<f32, GameCtx, _>::from_expr(Health);
+/// assert_eq!(node.eval(&Stats { hp: 61.0 }), 61.0);
+/// ```
+///
+/// The attributes have to be inside the parentheses. Written in front of the whole
+/// call — `#[doc = ".."] var_leaf!(..);` — they belong to the macro invocation and
+/// not to what it expands to, so rustc warns `unused doc comment` and
+/// `missing_docs` still fires. The `///` sugar only exists in item position, so the
+/// unsugared `#[doc = ".."]` is what goes in the slot; `#[allow(..)]` and friends
+/// go there the same way. A call with no attributes matches exactly as it always
+/// has, so nothing written against the macro so far needs editing.
+///
+/// There is no visibility slot, and one is deliberately not added: putting
+/// `$vis:vis` ahead of `$name` would silently turn today's generated `pub` items
+/// private for every caller who writes a bare call. If configurable visibility is
+/// ever wanted, it should arrive as an extra macro arm with this one still
+/// generating `pub`.
+///
+/// # The generated fetch, and what it cannot reach
 ///
 /// The fetch body is compiled directly into `eval`, not stored as a closure or a
-/// function pointer. That is deliberate: the context item is a generic associated
+/// function pointer. The reason is the context item: it is a generic associated
 /// type (`C::ContextItem<'w, 's>`), and a `move |ctx| ..` closure cannot be
 /// higher-ranked over those two lifetimes, so a stored closure would not
-/// typecheck. `$bind` is bound to the incoming `&ContextItem`, so `|ctx| ctx.hp`
-/// reads exactly as it reads here. A body that ignores the binding should name it
-/// with a leading underscore (`|_ctx| ..`), as with any unused binding.
+/// typecheck. That describes the shape of the generated code, not a reason to
+/// prefer the macro — a hand-written leaf puts its fetch in `eval` for the very
+/// same reason. `$bind` is bound to a reference to the incoming context item
+/// (`&ContextItem`), so `|ctx| ctx.hp` reads exactly as it reads here. A body that
+/// ignores the binding should name it with a leading underscore (`|_ctx| ..`), as
+/// with any unused binding.
+///
+/// Because the body is compiled into a generated item rather than run where it is
+/// written, it can reach neither of these (both verified against this crate):
+///
+/// * The type parameters of a generic item the call sits in. Invoking inside
+///   `fn make<T: Default>() { .. }` with `T` as the value type and `T::default()`
+///   as the body reports `E0401`, *can't use generic parameters from outer item*
+///   — a nested item is independent of its parent.
+/// * A local of the invocation scope. `let base = 1.0f32;` and then a body of
+///   `|_ctx| base` reports `E0434`, *can't capture dynamic environment in a fn
+///   item*.
+///
+/// Invoke at module level, and let the leaf read what it needs out of the context.
+///
+/// `$value` has to be owned, or name its lifetimes. A bare `&str` is rejected:
+/// lifetime elision hands the `&` in the generated `eval` the `&self` borrow, so
+/// the body cannot borrow from the context parameter, and the call reports "impl
+/// item signature doesn't match trait item signature" together with "lifetime may
+/// not live long enough" — not `E0106`, which the elision sidesteps. A type whose
+/// lifetimes are spelled out, such as `&'static str`, is accepted, but then the
+/// body has to supply a value of that lifetime: a `&ContextItem` borrow cannot do
+/// that, so take a `&'static str` from a `const` or `static` and clone what comes
+/// out of the context.
 ///
 /// ```
 /// use express_it::prelude::*;
@@ -235,6 +312,9 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 /// // The point of the macro: two attributes, two keys.
 /// assert_ne!(keys(&health), keys(&attack));
 ///
+/// // And a tree of the two reports both, not one merged key.
+/// assert_eq!(keys(&(health + attack)).len(), 2);
+///
 /// // The same pair built through `Node::new` collapses to one key.
 /// let hp_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.hp);
 /// let atk_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.attack);
@@ -243,7 +323,8 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 /// ```
 #[macro_export]
 macro_rules! var_leaf {
-    ($name:ident, $value:ty, $ctx:ty, |$bind:ident| $body:expr) => {
+    ($(#[$meta:meta])* $name:ident, $value:ty, $ctx:ty, |$bind:ident| $body:expr) => {
+        $(#[$meta])*
         #[derive(Clone, Copy)]
         pub struct $name;
 
@@ -594,6 +675,21 @@ mod tests {
         assert_eq!(leaf_keys.len(), 2, "one key per leaf type");
         assert!(leaf_keys.contains(&TypeId::of::<ProbeAttack>()));
         assert!(leaf_keys.contains(&TypeId::of::<ProbeDefense>()));
+
+        // The claim the macro exists for, asserted on the composite itself rather
+        // than on two merged single-leaf sets: a tree of two macro leaves reports
+        // two dependency keys.
+        let mut composite_keys = HashSet::new();
+        (attack + defense).get_dependencies(&mut composite_keys);
+        assert_eq!(
+            composite_keys.len(),
+            2,
+            "a composite of two var_leaf! attributes reports two keys"
+        );
+        assert_eq!(
+            composite_keys, leaf_keys,
+            "and they are the very keys the two leaves report alone"
+        );
 
         let mut var_keys = HashSet::new();
         Node::<f32, Ctx, _>::new(|()| 10.0f32).get_dependencies(&mut var_keys);

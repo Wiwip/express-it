@@ -81,6 +81,29 @@ fn prelude_alone_builds_a_leaf_with_a_dependency_key_of_its_own() {
     hp().get_dependencies(&mut var_keys);
     def().get_dependencies(&mut var_keys);
     assert_eq!(var_keys.len(), 1, "and the shared VarExpr key unchanged");
+
+    // The payoff the commit message promises, asserted on a composite built from
+    // two macro leaves rather than on two merged single-leaf sets: the tree itself
+    // reports two keys — through an arithmetic node, and through the comparison and
+    // logic nodes too.
+    let mut sum_keys = HashSet::new();
+    (hp_leaf + def_leaf).get_dependencies(&mut sum_keys);
+    assert_eq!(
+        sum_keys.len(),
+        2,
+        "a composite of two var_leaf! attributes reports two dependency keys"
+    );
+
+    let mut condition_keys = HashSet::new();
+    hp_leaf
+        .lt(5.0)
+        .and(def_leaf.gt(1.0))
+        .get_dependencies(&mut condition_keys);
+    assert_eq!(
+        condition_keys.len(),
+        2,
+        "a boolean composite of the same two leaves reports those same two keys"
+    );
 }
 
 #[test]

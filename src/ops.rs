@@ -5,7 +5,6 @@ use num_traits::{Float, Num};
 use std::any::TypeId;
 use std::collections::HashSet;
 use std::fmt;
-use std::marker::PhantomData;
 
 macro_rules! impl_binary_op {
     ($trait_name:ident, $method_name:ident, $node_name:ident, $op:tt) => {
@@ -49,10 +48,7 @@ macro_rules! impl_binary_op {
 
             #[inline(always)]
             fn $method_name(self, rhs: Node<N, C, R>) -> Self::Output {
-                Node {
-                    expr: $node_name { lhs: self.expr, rhs: rhs.expr },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name { lhs: self.expr, rhs: rhs.expr })
             }
         }
 
@@ -67,13 +63,10 @@ macro_rules! impl_binary_op {
 
             #[inline(always)]
             fn $method_name(self, rhs: N) -> Self::Output {
-                Node {
-                    expr: $node_name {
-                        lhs: self.expr,
-                        rhs: LiteralNode { value: rhs },
-                    },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name {
+                    lhs: self.expr,
+                    rhs: LiteralNode { value: rhs },
+                })
             }
         }
     };
@@ -98,13 +91,10 @@ macro_rules! impl_left_literal {
 
             #[inline(always)]
             fn $method_name(self, rhs: Node<$prim, C, L>) -> Self::Output {
-                Node {
-                    expr: $node_name {
-                        lhs: LiteralNode { value: self },
-                        rhs: rhs.expr,
-                    },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name {
+                    lhs: LiteralNode { value: self },
+                    rhs: rhs.expr,
+                })
             }
         }
     };
@@ -166,10 +156,7 @@ macro_rules! impl_unary_op {
 
             #[inline(always)]
             fn $method_name(self) -> Self::Output {
-                Node {
-                    expr: $node_name { expr: self.expr },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name { expr: self.expr })
             }
         }
     };
@@ -231,13 +218,10 @@ macro_rules! impl_binary_method {
 
             #[inline(always)]
             fn $method_name(self, rhs: Node<N, C, R>) -> Self::Output {
-                Node {
-                    expr: $node_name {
-                        lhs: self.expr,
-                        rhs: rhs.expr,
-                    },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name {
+                    lhs: self.expr,
+                    rhs: rhs.expr,
+                })
             }
         }
 
@@ -251,13 +235,10 @@ macro_rules! impl_binary_method {
 
             #[inline(always)]
             fn $method_name(self, rhs: N) -> Self::Output {
-                Node {
-                    expr: $node_name {
-                        lhs: self.expr,
-                        rhs: LiteralNode { value: rhs },
-                    },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name {
+                    lhs: self.expr,
+                    rhs: LiteralNode { value: rhs },
+                })
             }
         }
     };
@@ -310,10 +291,7 @@ macro_rules! impl_unary_method {
 
             #[inline(always)]
             fn $method_name(self) -> Self::Output {
-                Node {
-                    expr: $node_name { expr: self.expr },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name { expr: self.expr })
             }
         }
     };
@@ -404,14 +382,11 @@ macro_rules! impl_trinary_method {
 
             #[inline(always)]
             fn $method_name(self, arg1: Node<N, C, A>, arg2: Node<N, C, B>) -> Self::Output {
-                Node {
-                    expr: $node_name {
-                        expr: self.expr,
-                        arg1: arg1.expr,
-                        arg2: arg2.expr,
-                    },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name {
+                    expr: self.expr,
+                    arg1: arg1.expr,
+                    arg2: arg2.expr,
+                })
             }
         }
 
@@ -426,14 +401,11 @@ macro_rules! impl_trinary_method {
 
             #[inline(always)]
             fn $method_name(self, arg1: N, arg2: N) -> Self::Output {
-                Node {
-                    expr: $node_name {
-                        expr: self.expr,
-                        arg1: LiteralNode { value: arg1 },
-                        arg2: LiteralNode { value: arg2 },
-                    },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name {
+                    expr: self.expr,
+                    arg1: LiteralNode { value: arg1 },
+                    arg2: LiteralNode { value: arg2 },
+                })
             }
         }
     };

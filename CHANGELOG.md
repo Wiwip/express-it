@@ -4,6 +4,32 @@ Behaviour changes that matter to a caller of `express-it`: what started working,
 stopped working, or changed meaning. The current API is documented in `README.md`
 and in `cargo doc --open`; this file only records what moved between releases.
 
+## Unreleased
+
+All additive except where noted.
+
+* `Node::from_expr(expr)` builds a node from a leaf the caller wrote. It takes no
+  `Expr` bound, since storing a leaf asks for none. Writing
+  `Node { expr, _marker: PhantomData }` still compiles — `Node`'s `_marker` field
+  is now `#[doc(hidden)]` but stays `pub`, and `tests/public_marker.rs` pins that
+  from a separate crate — but it is no longer the documented way in.
+* `var_leaf!(Name, Value, Ctx, |ctx| field)` declares one attribute as its own
+  zero-sized leaf, with its own dependency key and its own `Display` name. This is
+  the sixth exported macro and it is re-exported from the prelude. It accepts
+  attributes inside the invocation, as `var_leaf!(#[doc = "…"], …)`, so a crate
+  under `#![deny(missing_docs)]` can document the generated item.
+* A variable built through `Node::new` still shares one dependency key with every
+  other variable of the same value type and context; that behaviour is unchanged
+  and still pinned. Two `var_leaf!` attributes report two keys, so a composite
+  expression can now say which two attributes it depends on.
+* `PlanError::step_value_mismatch(step, expected)` constructs the variant that
+  `#[non_exhaustive]` makes unwritable outside the crate, so a hand-written
+  `StepExecutor` can report a mistyped value instead of swallowing it.
+* `Plan` carries `#[must_use]` on the type, so a discarded plan is diagnosed
+  whichever way it was built; `Plan::default();` was silent before. The
+  method-level attributes on `new` and `step` are gone, since clippy reports
+  `double_must_use` once the type has one.
+
 ## 0.2.0
 
 * `Plan::run` now returns `Result<(), PlanError>` instead of panicking: a missing

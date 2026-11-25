@@ -14,7 +14,9 @@ pub mod plan;
 /// be in scope for its own method to resolve. The prelude carries all of them,
 /// plus the items a caller has to name rather than call: `StepExecutor` and the
 /// three step types for a custom step, `PlanCache` for its signatures, and
-/// `AsCast` for a generic cast bound.
+/// `AsCast` for a generic cast bound. It also re-exports all six exported macros —
+/// `all!`, `any!`, `save!`, `save_cache!`, `load_cache!`, and `var_leaf!` — so the
+/// one glob carries the macros along with the traits.
 ///
 /// Purely additive: every item stays at its original path, so `use
 /// express_it::ops::ExprMax;` and friends keep working.

@@ -3,7 +3,6 @@ use crate::nodes::Node;
 use std::any::TypeId;
 use std::collections::HashSet;
 use std::fmt;
-use std::marker::PhantomData;
 
 #[derive(Copy, Clone)]
 pub struct LogicalNotNode<E> {
@@ -37,10 +36,7 @@ impl<C: Context, L: Expr<bool, C> + Copy> ExprLogicNot for Node<bool, C, L> {
 
     #[inline(always)]
     fn not(self) -> Self::Output {
-        Node {
-            expr: LogicalNotNode { inner: self.expr },
-            _marker: PhantomData,
-        }
+        Node::from_expr(LogicalNotNode { inner: self.expr })
     }
 }
 
@@ -92,14 +88,14 @@ macro_rules! impl_cmp_method {
 
             #[inline(always)]
             fn $method_name(self, rhs: R) -> Self::Output {
-                Node {
-                    expr: $node_name {
-                        lhs: self.expr,
-                        rhs: rhs.as_expr(),
-                        _marker: std::marker::PhantomData,
-                    },
+                // The `_marker` below belongs to the generated comparison node, a
+                // different type that keeps its own marker field; only the `Node`
+                // literal is replaced by `from_expr`.
+                $crate::nodes::Node::from_expr($node_name {
+                    lhs: self.expr,
+                    rhs: rhs.as_expr(),
                     _marker: std::marker::PhantomData,
-                }
+                })
             }
         }
     };
@@ -158,13 +154,10 @@ macro_rules! impl_logical_method {
 
             #[inline(always)]
             fn $method_name(self, rhs: R) -> Self::Output {
-                Node {
-                    expr: $node_name {
-                        lhs: self.expr,
-                        rhs: rhs.as_expr(),
-                    },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name {
+                    lhs: self.expr,
+                    rhs: rhs.as_expr(),
+                })
             }
         }
     };
@@ -221,13 +214,10 @@ macro_rules! impl_neg_logical_method {
 
             #[inline(always)]
             fn $method_name(self, rhs: R) -> Self::Output {
-                Node {
-                    expr: $node_name {
-                        lhs: self.expr,
-                        rhs: rhs.as_expr(),
-                    },
-                    _marker: PhantomData,
-                }
+                $crate::nodes::Node::from_expr($node_name {
+                    lhs: self.expr,
+                    rhs: rhs.as_expr(),
+                })
             }
         }
     };

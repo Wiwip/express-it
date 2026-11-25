@@ -231,8 +231,8 @@ variables are therefore indistinguishable to a dependency-driven invalidation la
 Give each attribute its own leaf type and the keys separate. `var_leaf!` declares
 one — a zero-sized `Expr` implementor whose `get_dependencies` inserts its own
 `TypeId` and whose `Display` prints its own name — and `Node::from_expr` makes a node
-out of it. The fourth argument is the fetch, `|ctx| ..`, with `ctx` bound to your
-context item:
+out of it. The fourth argument is the fetch, `|ctx| ..`, with `ctx` bound to a
+reference to your context item:
 
 ```rust
 use express_it::prelude::*;
