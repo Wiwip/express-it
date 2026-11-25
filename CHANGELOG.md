@@ -137,7 +137,9 @@ and `VarExpr::with_key` constructors, which cannot drift like this again.
   exactly right: three named lifetimes, with `'a` and `'s` — not `'w` — in the
   return type. Writing it with `'_` instead gives `E0106` plus `E0195` and points
   nowhere useful, so the trait page now carries a working implementation and a
-  `compile_fail` example of the elided form. Three more `compile_fail` examples
+  `compile_fail` example of the elided form. A write view that borrows must put
+  its borrow in the read view's *first* lifetime parameter, which the declaration
+  only implies, so that case is shown as a compiled example too. Three more `compile_fail` examples
   pin the `Send + Sync` bound on `Context` (an `Rc<RefCell<_>>` inside a context
   is `E0277`) and the cache-key lifetime rule below.
 
@@ -179,8 +181,8 @@ so it is left off; 150 is the number to drive down before it goes on.
 
 ### Verification
 
-`cargo test` on 0.3.0 runs 183 tests: 121 unit, 7 macro hygiene, 6 plan, 12
-prelude, 18 property, 3 stored-expression and 16 doctests. Four of the doctests
+`cargo test` on 0.3.0 runs 184 tests: 121 unit, 7 macro hygiene, 6 plan, 12
+prelude, 18 property, 3 stored-expression and 17 doctests. Four of the doctests
 are `compile_fail`, pinning the errors the documentation promises rather than the
 values it promises. The
 property suite checks dependency monotonicity across every combinator family (a

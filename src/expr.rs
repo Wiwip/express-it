@@ -105,10 +105,40 @@ pub trait ContextMut: Context {
     /// # fn _unused() {}
     /// ```
     ///
-    /// A `write view` that borrows (`type ContextItemMut<'w, 's> = &'w mut State;`)
-    /// is judged even more strictly, because the compiler compares which of the
-    /// three lifetimes actually appear in the signature: keeping the declared
-    /// names is what makes the impl match.
+    /// A write view that borrows works too, and this is where the parameter
+    /// order pays off: the returned read view is `ContextItem<'a, 's>`, so the
+    /// lifetime of the borrow is the **first** parameter. A read view that puts
+    /// its borrow in the second parameter instead (`&'s State`) fails with
+    /// `lifetime may not live long enough`, however correctly the method is
+    /// written:
+    ///
+    /// ```
+    /// use express_it::prelude::*;
+    ///
+    /// pub struct State {
+    ///     pub hp: f32,
+    /// }
+    ///
+    /// pub struct Ctx;
+    ///
+    /// impl Context for Ctx {
+    ///     type ContextItem<'w, 's> = &'w State;
+    /// }
+    ///
+    /// impl ContextMut for Ctx {
+    ///     type ContextItemMut<'w, 's> = &'w mut State;
+    ///
+    ///     fn as_readonly<'w, 's, 'a>(
+    ///         mut_item: &'a Self::ContextItemMut<'w, 's>,
+    ///     ) -> Self::ContextItem<'a, 's> {
+    ///         &**mut_item
+    ///     }
+    /// }
+    ///
+    /// let mut state = State { hp: 4.0 };
+    /// let mutable: &mut State = &mut state;
+    /// assert_eq!(Ctx::as_readonly(&mutable).hp, 4.0);
+    /// ```
     fn as_readonly<'w, 's, 'a>(
         mut_item: &'a Self::ContextItemMut<'w, 's>,
     ) -> Self::ContextItem<'a, 's>;
