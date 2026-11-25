@@ -132,8 +132,8 @@ and `VarExpr::with_key` constructors, which cannot drift like this again.
   asserts the field and both texts because cargo itself will not.
 * The centre of the API now has documentation. `Context`, `ContextMut`,
   `ContextMut::as_readonly`, `Expr::eval`, `AsExpression` and its `Target`, all
-  five public modules, `Node::lit`, `Node::alias` and `Node::expr` were bare
-  declarations before, and `as_readonly` is the one signature a user has to get
+  five public modules, `Node::lit`, `Node::alias`, `Node::expr` and both
+  `CacheSaveStep` fields were bare declarations before, and `as_readonly` is the one signature a user has to get
   exactly right: three named lifetimes, with `'a` and `'s` — not `'w` — in the
   return type. Writing it with `'_` instead gives `E0106` plus `E0195` and points
   nowhere useful, so the trait page now carries a working implementation and a
@@ -166,18 +166,19 @@ release — they are documented, and each has a note at the item that raises it.
   workaround meanwhile is a literal, a `const`, or `Box::leak`.
 * **`Context: Send + Sync`.** A context holding `Rc<RefCell<_>>` is rejected with
   `E0277`, so a single-threaded host must use `Arc<Mutex<_>>` or `Arc<RwLock<_>>`.
-  The bound has been there since well before 0.2.0 but was stated nowhere until
-  now; anyone pinning an older checkout will find it unannounced in the source.
+  The bound arrived one commit into the 0.2.0 window — `8bf50ab`, with `Cargo.toml`
+  already reading 0.2.0 — and was stated nowhere until now, so anyone pinning an
+  older checkout finds it unannounced in the source and unmentioned here.
 * **A boxed sub-expression cannot be displayed.** `Display` for `Node` asks its
   payload to be `Display`, and `Box<dyn Expr>` is not, so a tree deepened through
   `erase()` evaluates and reports dependencies but will not print. Documented on
   both the helper and `StoredExpr`.
 
 The crate also does not yet enforce its own documentation: `RUSTFLAGS="-W
-missing_docs" cargo check` reports 150 warnings, down from 167 in this cycle, and
+missing_docs" cargo check` reports 149 warnings, down from 167 in this cycle, and
 almost all of them are the macro-generated node structs and operator traits rather
 than hand-written API. Turning the lint on in `src/lib.rs` would fail CI at once,
-so it is left off; 150 is the number to drive down before it goes on.
+so it is left off; 149 is the number to drive down before it goes on.
 
 ### Verification
 

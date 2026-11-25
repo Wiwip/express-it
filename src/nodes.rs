@@ -38,8 +38,8 @@ impl<N: 'static + Clone, C: Context, E: Expr<N, C>> Node<N, C, E> {
     /// The key is `&'static str`, so it must be a literal, a `const`, or
     /// otherwise outlive the whole program. A key built at run time will not
     /// compile here — `E0597`, the borrow does not live long enough — even though
-    /// neighbouring [`save!`](crate::save!) and
-    /// [`load_cache!`](crate::load_cache!) both accept an owned `String`:
+    /// neighbouring four-argument [`save!`](crate::save!) and
+    /// [`load_cache!`](crate::load_cache!) both accept an owned key:
     ///
     /// ```compile_fail
     /// # use express_it::prelude::*;
@@ -96,7 +96,9 @@ impl<N, C: Context> Node<N, C, LiteralNode<N>> {
     ///
     /// The value's own type fixes the tree's value type, so `Node::lit(1.0f64)`
     /// and `Node::lit(1.0f32)` are different trees. A primitive written directly
-    /// as an operand (`health * 2.0`) is lifted into this same leaf by
+    /// as an operand (`health * 2.0`) is turned into this same leaf by the
+    /// operator's own impl for primitives; the comparison and logic combinators
+    /// reach the same leaf through
     /// [`AsExpression`](crate::expr::AsExpression).
     #[inline(always)]
     pub fn lit(value: N) -> Self {
@@ -204,8 +206,8 @@ impl<N: fmt::Display, C: Context, E: Expr<N, C> + fmt::Display> fmt::Display for
 /// Does NOT write to the context state — pure cache-only step.
 pub struct CacheSaveStep<N: 'static, C: Context, E> {
     /// The cache slot to write. `&'static str`, so a literal or a leaked string:
-    /// a key built at run time does not compile here, unlike the owned keys
-    /// `save!` and `load_cache!` accept.
+    /// a key built at run time does not compile here, unlike the owned key the
+    /// four-argument `save!` and `load_cache!` accept.
     pub key: &'static str,
     /// The expression evaluated and stored; the context is never written.
     pub expr: Node<N, C, E>,

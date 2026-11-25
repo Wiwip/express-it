@@ -20,11 +20,14 @@ pub mod logic;
 /// constructors (`lit`, `new`, `var`, `from_expr`), the `var_leaf!` macro, the
 /// `cast` conversions, and the cache-save step.
 pub mod nodes;
-/// Arithmetic: the `+ - * / %` operator impls on `Node` (including a primitive on
-/// the left), and the method nodes `powf`, `min`, `max`, `abs`, `sqrt`, `acos`,
-/// `clamp`.
+/// Arithmetic: the `+ - * / %` operator impls on `Node` — for `+ - * /` a
+/// primitive may sit on the left, while `%` needs a `Node` on the left — and the
+/// method nodes `powf`, `min`, `max`, `abs`, `sqrt`, `acos`, `clamp`.
 ///
-/// There are no public items in this module; it exists to hold the impls.
+/// Its public items are the node structs those methods build (`AddNode`,
+/// `MaxNode`, `FloatClampNode`, …) and the extension traits that attach the
+/// methods to `Node` (`ExprMax`, `ExprClamp`, …); seven of the latter are
+/// re-exported by the prelude. There are no free functions.
 pub mod ops;
 /// Ordered side effects: [`Plan`](plan::Plan), the step types, the
 /// [`PlanCache`](plan::PlanCache), [`PlanError`](plan::PlanError), and the

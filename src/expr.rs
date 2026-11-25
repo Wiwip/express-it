@@ -11,8 +11,9 @@ use std::fmt;
 ///
 /// `ContextItem` is a generic associated type so a context can hand out a borrow
 /// of its state (`&'w State`) instead of a copy of it. A context whose read view
-/// is the state by value simply ignores both parameters, which is what every
-/// example in this crate does.
+/// is the state by value simply ignores both parameters, which most examples in
+/// this crate do; `examples/expr_demo.rs` and the borrowing `as_readonly` example
+/// further down this page hand out a borrow instead.
 ///
 /// The trait requires `Send + Sync`, so the *context type* must be safe to share
 /// between threads. Single-threaded interior mutability is therefore rejected:
@@ -28,9 +29,10 @@ use std::fmt;
 /// }
 /// ```
 ///
-/// fails with `E0277: Rc<RefCell<f32>> cannot be shared between threads safely`.
-/// `Arc<Mutex<T>>` and `Arc<RwLock<T>>` are fine. The bound is on the context
-/// type alone; the read view it hands out carries no such requirement.
+/// fails with `E0277`, twice over: `Rc<RefCell<f32>> cannot be shared between
+/// threads safely` and `… cannot be sent between threads safely`. `Arc<Mutex<T>>`
+/// and `Arc<RwLock<T>>` are fine. The bound is on the context type alone; the
+/// read view it hands out carries no such requirement.
 pub trait Context: Send + Sync {
     /// The read view handed to every leaf during one evaluation.
     type ContextItem<'w, 's>;
@@ -81,8 +83,8 @@ pub trait ContextMut: Context {
     ///
     /// Eliding those lifetimes into `'_` does not compile, and the errors do not
     /// point at the cause: the signature below gives `E0106: missing lifetime
-    /// specifiers` together with `E0195: lifetime parameters or bounds … do not
-    /// match the trait declaration`.
+    /// specifiers` together with `E0195: lifetime parameters do not match the
+    /// trait definition`.
     ///
     /// ```compile_fail
     /// # use express_it::prelude::*;
@@ -489,6 +491,10 @@ pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
 /// (`max`, `clamp`, `sqrt`, …) but not with the comparison (`.ge()`, `.le()`, …)
 /// or logical (`.and()`, `.or()`, …) combinators, whose impls require
 /// `L: Expr<N, C> + Copy`.
+///
+/// The box brings a second limitation: it is not `Display`, and `impl Display for
+/// Node` asks its payload to be, so a tree deepened by boxing a sub-expression
+/// evaluates and reports its dependency keys but cannot be printed.
 pub type StoredExpr<N, C> = Box<dyn Expr<N, C> + Send + Sync>;
 
 // Forwards through `Box` so the alias above composes into a tree: without it a
@@ -506,14 +512,18 @@ impl<N, C: Context, E: Expr<N, C> + ?Sized> Expr<N, C> for Box<E> {
     }
 }
 
-/// What an operator operand may be.
+/// What an operand may be, for the comparison and logical combinators.
 ///
-/// Every operator takes `impl AsExpression<..>` on the right-hand side, and
-/// exactly two shapes implement it: a [`Node`], which contributes the leaf it
-/// already holds, and any Rust primitive (`f32`, `f64`, the integers, `bool`,
-/// `char`), which is lifted into a [`LiteralNode`]. That is what makes
-/// `health * 1.5` and `health * other_node` both compile without a helper
-/// function or a `From` impl at the call site.
+/// `.lt()`, `.ge()`, `.and()` and their siblings take `impl AsExpression<..>` on
+/// the right-hand side, and exactly two shapes implement the trait: a [`Node`],
+/// which contributes the leaf it already holds, and any Rust primitive (`f32`,
+/// `f64`, the integers, `bool`, `char`), which is lifted into a [`LiteralNode`].
+/// A type of your own can implement it too, and `.gt()` will accept it.
+///
+/// The arithmetic operators do **not** go through this trait: `+ - * / %` and the
+/// method nodes each carry their own impls for a `Node` operand and for the bare
+/// primitive, and the primitive arm builds the `LiteralNode` itself. So
+/// `health * 1.5` compiles, and a custom `AsExpression` handed to `*` does not.
 pub trait AsExpression<N, C: Context> {
     /// The leaf the operand turns into inside the node being built: a [`Node`]'s
     /// own payload, or a [`LiteralNode`] for a primitive.
