@@ -49,12 +49,13 @@ impl PlanCache {
 /// in this module panics. It is plain data, hence `Send + Sync`, so it crosses the
 /// `dyn StepExecutor` boundary back to [`Plan::run`] without extra boxing.
 ///
-/// The variants are constructed inside this crate only. Both the enum and each of
-/// its struct variants are `#[non_exhaustive]`, so code outside this crate can
-/// match on them (with a wildcard arm and `..`) but cannot build one: a custom
-/// [`StepExecutor`] reports a failure by propagating a `PlanError` it received,
-/// such as the one a delegated step's [`StepExecutor::evaluate`] returns, not by
-/// constructing a new variant.
+/// Both the enum and each of its struct variants are `#[non_exhaustive]`, so code
+/// outside this crate can match on them (with a wildcard arm and `..`) but cannot
+/// build one by naming a variant. A custom [`StepExecutor`] therefore reports a
+/// failure by propagating a `PlanError` it received — such as the one a delegated
+/// step's [`StepExecutor::evaluate`] returns — plus the one failure it detects
+/// itself, built through [`PlanError::step_value_mismatch`], the only constructor
+/// this enum offers.
 // `non_exhaustive` on the enum and on every struct variant, so a later release can
 // add a variant or a field without a semver break; the downstream cost is spelled
 // out in the docs above.
@@ -83,6 +84,22 @@ pub enum PlanError {
         /// What that `apply` needed, in words or as a type name.
         expected: &'static str,
     },
+}
+
+impl PlanError {
+    /// Builds the [`PlanError::StepValueMismatch`] case: `step`'s `apply` received a
+    /// value that is not the one its own `evaluate` produces.
+    ///
+    /// This is a constructor rather than a public variant because the variants are
+    /// `#[non_exhaustive]`: naming one from outside this crate is a compile error,
+    /// and a downstream [`StepExecutor`] that hands `apply` a value it cannot write
+    /// would otherwise have to swallow the fact. `step` is the name to blame — a
+    /// type name, as `std::any::type_name_of_val` gives you, or any string that
+    /// identifies the step — and `expected` says what that `apply` needed.
+    #[must_use]
+    pub fn step_value_mismatch(step: &'static str, expected: &'static str) -> Self {
+        Self::StepValueMismatch { step, expected }
+    }
 }
 
 impl fmt::Display for PlanError {
@@ -114,12 +131,23 @@ impl std::error::Error for PlanError {}
 ///   what [`StepExecutor::apply`] expects to receive.
 /// * [`StepExecutor::apply`] performs the writes (context fields and/or cache
 ///   keys) and consumes the value produced by `evaluate`.
+/// * The two phases do not interleave. Within one step, `evaluate` finishes before
+///   `apply` begins, so nothing a step writes can be read by that same step. For a
+///   step that carries several elements — a tuple, see the [`StepExecutor`] impl on
+///   tuples — this holds across the whole step: `evaluate` runs for every element
+///   before `apply` runs for any of them, so one element cannot observe what another
+///   element writes. A value written by an element becomes visible to the *next*
+///   step, never to a later element of the same one.
 /// * Neither method panics on a value-routing path. A missing or wrong-typed cache
 ///   entry, and a boxed value that does not match the step, are reported as
-///   [`PlanError`] — never swallowed and never panicked. `Plan::run` stops at the
-///   first `Err` and hands it to the caller. An implementation outside this crate
-///   can only propagate a `PlanError` it received: the variants cannot be
-///   constructed downstream, see [`PlanError`].
+///   [`PlanError`] — never swallowed and never panicked — and `Plan::run` stops at
+///   the first `Err` and hands it to the caller. That guarantee comes with the rule
+///   of how a step reports one: the variants are `#[non_exhaustive]`, so an
+///   implementation outside this crate propagates a `PlanError` it received (from a
+///   step it delegates to, say) and constructs only the failure it can name, through
+///   [`PlanError::step_value_mismatch`]. A downstream step that neither propagates
+///   nor constructs an error is not honouring this contract; it is swallowing a
+///   failure.
 pub trait StepExecutor<C: ContextMut>: Send + Sync {
     /// Read-only: evaluate against current context + shared cache.
     fn evaluate(
@@ -139,15 +167,23 @@ pub trait StepExecutor<C: ContextMut>: Send + Sync {
 
 // ---------- Plan ----------
 
+/// An ordered list of steps, executed once by [`Plan::run`].
+///
+/// `#[must_use]` on the type: a plan does nothing until it is run, so a plan built
+/// and dropped as a statement is always a mistake. On the type rather than on the
+/// constructors, so it covers every way to obtain one — [`Plan::new`],
+/// [`Default::default`], [`Plan::step`], and any function returning a plan.
+#[must_use = "a plan does nothing until it is run"]
 pub struct Plan<C: Context> {
     steps: Vec<Box<dyn StepExecutor<C>>>,
     _marker: PhantomData<C>,
 }
 
 impl<C: ContextMut> Plan<C> {
-    /// An empty plan. `#[must_use]`: a plan that is built and never run does nothing,
-    /// so a discarded builder is always a mistake — see [`Plan::step`].
-    #[must_use]
+    /// An empty plan.
+    ///
+    /// `Plan` is `#[must_use]`, because a plan that is built and never run does
+    /// nothing: a discarded builder is always a mistake, here or at [`Plan::step`].
     pub fn new() -> Self {
         Self {
             steps: Vec::new(),
@@ -155,10 +191,11 @@ impl<C: ContextMut> Plan<C> {
         }
     }
 
-    /// Consumes the builder and returns it with `step` appended. `#[must_use]`: the
-    /// step is added to the returned plan, not to the receiver, so calling this as a
-    /// bare statement discards the step instead of adding it.
-    #[must_use]
+    /// Consumes the builder and returns it with `step` appended.
+    ///
+    /// The step is added to the returned plan, not to the receiver, so calling this
+    /// as a bare statement discards the step instead of adding it — one of the ways
+    /// `Plan` being `#[must_use]` earns that attribute.
     pub fn step<S>(mut self, step: S) -> Self
     where
         S: StepExecutor<C> + 'static,
@@ -292,8 +329,11 @@ where
 ///   save!(ctx_ty, field, expr, cache_key)     -> cache_key: Some(cache_key.to_string())
 ///
 /// The result is a step, not a value: hand it to [`Plan::step`] and run the plan
-/// with [`Plan::run`], which returns `Result<(), PlanError>`. An assignment step
-/// always evaluates and always applies, so it is never the step that fails a run.
+/// with [`Plan::run`], which returns `Result<(), PlanError>`. Under [`Plan::run`] an
+/// assignment step always evaluates and always applies, because `run` feeds `apply`
+/// the very value that step's own `evaluate` produced, so it is never the step that
+/// fails a run. Hand-calling [`StepExecutor::apply`] with a value of another type is
+/// the exception: it reports [`PlanError::StepValueMismatch`] and writes nothing.
 ///
 /// Examples:
 ///   let plan = plan.step(save!(CombatState, damage_dealt, Node::lit(35)));
@@ -320,7 +360,10 @@ macro_rules! save {
 
 /// Inline macro to create a cache-save step: [`CacheSaveStep`], which writes the
 /// expression's value into the run's [`PlanCache`] and writes nothing to the
-/// context. Feed it to [`Plan::step`]; a cache-save step never fails a run.
+/// context. Feed it to [`Plan::step`]; under [`Plan::run`] a cache-save step never
+/// fails a run, for the same reason an assignment step does — `run` hands it its own
+/// `evaluate` output. A hand-called [`StepExecutor::apply`] with a value of another
+/// type does report [`PlanError::StepValueMismatch`].
 ///
 /// Usage:
 ///   let plan = plan.step(save_cache!("my_key", Node::lit(42)));
@@ -403,6 +446,40 @@ where
 
 macro_rules! impl_step_executor_for_tuple {
     ($($names:ident),+) => {
+        /// Several steps grouped into one [`Plan`] step.
+        ///
+        /// The tuple is a single step, so the two phases are batched over the whole
+        /// tuple: `evaluate` runs for every element, front to back, before `apply`
+        /// runs for any of them. Declaration order therefore decides which value goes
+        /// to which element (element one gets value one), not whether one element's
+        /// write lands before another element reads it — it does not. Both elements
+        /// read the context and the cache as they stood when the step started.
+        ///
+        /// ```text
+        /// // One step, two elements; the second reads the field the first writes.
+        /// let mut state = State { a: 1, b: 0 };
+        /// Plan::<Ctx>::new()
+        ///     .step((
+        ///         save!(State, a, Node::lit(7)),                 // writes a = 7
+        ///         save!(State, b, Node::new(|ctx: &State| ctx.a)), // reads a: still 1
+        ///     ))
+        ///     .run(&mut state)
+        ///     .expect("both elements apply");
+        /// assert_eq!((state.a, state.b), (7, 1));
+        ///
+        /// // The same two elements as two steps: now the write is visible.
+        /// let mut state = State { a: 1, b: 0 };
+        /// Plan::<Ctx>::new()
+        ///     .step(save!(State, a, Node::lit(7)))
+        ///     .step(save!(State, b, Node::new(|ctx: &State| ctx.a)))
+        ///     .run(&mut state)
+        ///     .expect("both steps apply");
+        /// assert_eq!((state.a, state.b), (7, 7));
+        /// ```
+        ///
+        /// The run cache is batched the same way: `save_cache!("k", e)` grouped with
+        /// `load_cache!(T, "k")` in one tuple is a [`PlanError::CacheMiss`], because
+        /// the lookup evaluates before the save applies. Make them two steps.
         #[allow(non_snake_case)]
         impl<C, $($names),+> StepExecutor<C> for ($($names,)+)
         where
@@ -548,6 +625,72 @@ mod tests {
         plan.run(&mut state).expect("3-tuple step must apply");
 
         assert_eq!((state.a, state.b, state.note), (1, 2, 3));
+    }
+
+    #[test]
+    fn elements_of_one_tuple_step_read_the_state_before_the_tuple_ran() {
+        // A tuple is ONE step: `evaluate` runs for every element before `apply` runs
+        // for any of them, so element two reads `a` as it stood before the step and
+        // never sees element one's write.
+        let mut state = State {
+            a: 3,
+            ..State::default()
+        };
+        let plan = Plan::<Ctx>::new().step((
+            save!(State, a, Node::lit(7)),
+            save!(State, b, Node::new(|ctx: &State| ctx.a)),
+        ));
+
+        plan.run(&mut state)
+            .expect("a stale read is not an error: both elements apply");
+
+        assert_eq!(
+            (state.a, state.b),
+            (7, 3),
+            "element two observed the pre-step `a`, not element one's write"
+        );
+
+        // The same two elements as two steps: the write of step one is visible to
+        // step two, which is the only way to get the sequential reading.
+        let mut state = State {
+            a: 3,
+            ..State::default()
+        };
+        let plan = Plan::<Ctx>::new()
+            .step(save!(State, a, Node::lit(7)))
+            .step(save!(State, b, Node::new(|ctx: &State| ctx.a)));
+
+        plan.run(&mut state).expect("two steps must apply");
+
+        assert_eq!((state.a, state.b), (7, 7), "step two read step one");
+    }
+
+    #[test]
+    fn cache_write_and_lookup_of_one_key_in_one_tuple_report_a_cache_miss() {
+        // One step: the tuple evaluates the lookup before the save's `apply` has
+        // written the key, so the key is genuinely absent at lookup time.
+        let mut state = State::default();
+        let plan =
+            Plan::<Ctx>::new().step((save_cache!("note", Node::lit(9)), load_cache!(i32, "note")));
+
+        let err = plan
+            .run(&mut state)
+            .expect_err("a lookup cannot see a write from its own step");
+
+        assert_eq!(
+            err,
+            PlanError::CacheMiss {
+                key: "note".to_string()
+            }
+        );
+
+        // The very same two steps, one step each: the write lands first.
+        let mut state = State::default();
+        Plan::<Ctx>::new()
+            .step(save_cache!("note", Node::lit(9)))
+            .step(load_cache!(i32, "note"))
+            .run(&mut state)
+            .expect("as separate steps the write is visible to the lookup");
     }
 
     #[test]

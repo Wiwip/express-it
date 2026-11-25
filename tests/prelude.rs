@@ -1,6 +1,6 @@
 //! One glob import has to be enough: every trait whose method the workload calls,
-//! every type a caller has to write down, plus the four exported macros, arrive
-//! through `express_it::prelude`.
+//! every type a caller has to write down, plus the five exported macros (`all`,
+//! `any`, `save`, `save_cache`, `load_cache`), arrive through `express_it::prelude`.
 //!
 //! The last test pins the other half of the contract — the prelude is additive,
 //! so the pre-existing full paths keep resolving and name the very same items.
@@ -100,10 +100,12 @@ fn prelude_alone_supports_a_plan_built_with_the_three_step_macros() {
 /// A step written by hand, named entirely through the prelude glob: `StepExecutor`,
 /// `PlanCache`, `PlanError`, `CacheLookupStep`.
 ///
-/// It delegates the read to a `CacheLookupStep`, which is also how a step outside
-/// the crate reports what it can report: `PlanError`'s variants are
-/// `#[non_exhaustive]`, so downstream code propagates the delegate's error instead
-/// of constructing one.
+/// It delegates the read to a `CacheLookupStep`, which is also how it reports a
+/// failure it did not detect: `PlanError`'s variants are `#[non_exhaustive]`, so
+/// downstream code propagates the delegate's error instead of naming a variant.
+/// The failure it detects for itself — a value it cannot write — is reported through
+/// [`PlanError::step_value_mismatch`], the public constructor that exists for
+/// exactly that case.
 struct ShieldFromCache {
     lookup: CacheLookupStep<f32>,
 }
@@ -121,13 +123,56 @@ impl StepExecutor<Ctx> for ShieldFromCache {
         _cache: &mut PlanCache,
     ) -> Result<(), PlanError> {
         // Under `Plan::run` the value always comes from this step's own `evaluate`,
-        // so the downcast below succeeds. A hand-call with another type cannot be
-        // reported downstream — there is no way to name a `PlanError` variant here.
-        if let Ok(value) = value.downcast::<f32>() {
-            ctx.shield = *value;
-        }
+        // so the downcast below succeeds. A hand-call with another type is still
+        // reported: `PlanError::StepValueMismatch { .. }` cannot be written out here
+        // (the variant is `#[non_exhaustive]`), but `step_value_mismatch` builds the
+        // same value from outside the crate.
+        let value = value.downcast::<f32>().map_err(|_| {
+            PlanError::step_value_mismatch("ShieldFromCache", std::any::type_name::<f32>())
+        })?;
+        ctx.shield = *value;
         Ok(())
     }
+}
+
+#[test]
+fn a_hand_written_step_reports_a_value_mismatch_through_the_public_constructor() {
+    // The proof the constructor is sufficient: a step outside the crate cannot name
+    // the variant, yet can report the mismatch instead of swallowing it. The value
+    // is fed to `apply` by hand here because `Plan::run` always hands a step its own
+    // `evaluate` output, which is why this path is unreachable through a run.
+    let mut state = start();
+    let mut cache = PlanCache::default();
+    let shield = ShieldFromCache {
+        lookup: CacheLookupStep::new("shield_seed"),
+    };
+
+    let err = <ShieldFromCache as StepExecutor<Ctx>>::apply(
+        &shield,
+        &mut state,
+        Box::new(1i32),
+        &mut cache,
+    )
+    .expect_err("a value this step cannot write must be an Err, not a silent no-op");
+
+    let PlanError::StepValueMismatch {
+        step: step_name,
+        expected,
+        ..
+    } = err
+    else {
+        panic!("expected StepValueMismatch, got {err:?}");
+    };
+    assert_eq!(step_name, "ShieldFromCache");
+    assert_eq!(expected, "f32");
+    assert!(
+        err.to_string().contains("ShieldFromCache"),
+        "and the message names the step: {err}"
+    );
+    assert_eq!(
+        state.shield, 0.0,
+        "a rejected value must not be half-applied"
+    );
 }
 
 #[test]

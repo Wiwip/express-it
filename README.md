@@ -15,12 +15,19 @@ a per-run typed cache, or both. Steps run in order, so step *N* sees what step
 
 ```text
 express_it::expr    Context / ContextMut, Expr, AsExpression, StoredExpr
-express_it::nodes   Node, Var, VarExpr, LiteralNode, CastNode, CacheSaveStep
+express_it::nodes   Node, Var, VarExpr, CacheSaveStep; LiteralNode and CastNode,
+                    the tree shapes, live here and only here — see the last line
 express_it::ops     + - * / %, unary - and !, powf, min, max, abs, acos, sqrt, clamp
-express_it::logic   == != < <= > >=, not, and or xor nand nor nxor, all!, any!
+express_it::logic   == != < <= > >=, not, and or xor nand nor nxor
 express_it::plan    Plan, PlanCache, PlanError, StepExecutor, AssignmentStep,
-                    CacheLookupStep, save!, save_cache!, load_cache!
-express_it::prelude everything above that a caller has to import, in one glob
+                    CacheLookupStep
+express_it          the five macros, each `#[macro_export]`ed, so this is their only
+                    home: all!, any!, save!, save_cache!, load_cache!
+                    (`express_it::logic::all` and `express_it::plan::save` do not
+                    resolve — E0432)
+express_it::prelude every trait whose method you call, every step type you have to
+                    name, and all five macros, in one glob — the two tree shapes are
+                    the deliberate exception
 ```
 
 ## Adding the crate
@@ -94,6 +101,14 @@ every `Node` is `Copy` when its payload is, so a node stays usable after you use
 A plan is a list of steps. `save!` writes to a context field (and optionally also
 under a cache key), `save_cache!` writes only to the per-run cache, and
 `load_cache!` reads a key back — which is the step that can fail.
+
+Steps grouped into a tuple — `(save!(..), save!(..))` handed to one `.step(..)` —
+run as a *single* step: every element is evaluated before any element is applied.
+Declaration order then decides which value goes to which element, not what each
+element reads. Two elements of one tuple never see each other's writes, and
+`save_cache!("k", e)` tupleed together with `load_cache!(T, "k")` is a
+`PlanError::CacheMiss`, because the lookup evaluates before the save writes. Make
+them two steps whenever one has to feed the other.
 
 ```rust
 use express_it::prelude::*;
@@ -216,40 +231,30 @@ your own type, insert your own key in `get_dependencies`, and use it as the `E`
 parameter of `Node`. Everything else in the crate forwards dependencies downward,
 so your keys arrive intact.
 
-## What changed in 0.2
+## Version history
 
-* `Plan::run` now returns `Result<(), PlanError>` instead of panicking: a missing
-  cache key, a key holding the wrong type, and a value handed to the wrong step all
-  come back as an error. The steps before the failure stay applied.
-* Steps grouped in a tuple are now applied in declaration order — element one gets
-  value one. They were applied reversed, so a tuple step wrote the wrong fields.
-* `Node::cast::<T>()` is total: it performs Rust's `as` conversion instead of
-  panicking on a cast that `NumCast` could not represent.
-* The cast bound narrowed. `Node::cast` now requires `AsCast`, which this crate
-  implements for the primitive numeric types; a `Num` type of your own needs its own
-  `AsCast` impl to stay castable.
-* `PlanCache::has::<T>` is now type-strict — the only cache change here that neither
-  fails to compile nor reports an error at run time. A key that holds some other type
-  now simply answers `false` where it used to answer `true`. (The tuple ordering fix
-  and the total `cast` above are silent in their own way too: one quietly starts
-  writing the right fields, the other quietly stops panicking.)
-* The criterion benches in `benches/` now actually execute; they were declared
-  without being wired up, so `cargo bench` ran nothing.
-* `PlanError` is `#[non_exhaustive]`, on the enum and on every variant, so adding a
-  variant or a field later is not a semver break. The cost: code outside the crate
-  can no longer construct those variants, so a `StepExecutor` you write yourself
-  reports a failure by propagating one it received — say from a step it delegates
-  to — rather than building a new error.
-* The bevy example terminates: it drives the schedule once and returns instead of
-  looping forever.
+Release-by-release behaviour changes live in
+[CHANGELOG.md](CHANGELOG.md) at the repository root. This page describes the
+current API and does not carry release notes.
 
 ## Examples and benches
 
-`cargo run --example expr_demo` (bevy-backed variables), `--example conditions`,
-`--example display`, `--example plan`; `cargo bench` runs the criterion suites in
-`benches/`.
+The examples in `examples/` and the criterion suites in `benches/` are development
+targets of this crate: they belong to a clone of the repository, not to depending
+on the crate, because they need its dev-dependencies (`bevy`, `criterion`). From a
+clone of the repository:
+
+```sh
+cargo run --example expr_demo   # bevy-backed variables
+cargo run --example conditions
+cargo run --example display
+cargo run --example plan
+cargo bench                     # the four criterion suites
+```
 
 ## License
 
-Undecided. There is no license grant yet, so no permission to copy, distribute, or
-modify is granted — the crate is not publishable until the owner settles this.
+No license has been granted for this crate. The manifest carries no `license` field
+and there is no `LICENSE` file, so nothing here grants permission to copy,
+distribute, or modify it: treat the source as all rights reserved. The question is
+open with the repository owner, and this section is where the answer will appear.
