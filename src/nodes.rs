@@ -8,11 +8,10 @@ use std::marker::PhantomData;
 pub struct Node<N, C, E> {
     pub expr: E,
     // Carries the `N` and `C` parameters, which the struct otherwise would not
-    // mention. Deliberately `pub` and `#[doc(hidden)]` rather than private — see
-    // [`Node::from_expr`], whose doc comment carries the whole reason, and
-    // `tests/public_marker.rs`, which pins it from a separate crate.
-    #[doc(hidden)]
-    pub _marker: PhantomData<(N, C)>,
+    // mention. Private as of 0.3: a caller supplies a leaf through
+    // [`Node::from_expr`] rather than by naming this field, and that
+    // constructor's doc comment carries the whole route.
+    _marker: PhantomData<(N, C)>,
 }
 
 impl<N: 'static + Clone, C: Context, E: Expr<N, C>> Node<N, C, E> {
@@ -26,25 +25,21 @@ impl<N, C, E> Node<N, C, E> {
     ///
     /// `E` is the node's own shape, so a leaf of your own becomes a node here:
     /// the leaf can carry a dependency key of its own, which a variable built
-    /// through [`Node::new`] cannot. This replaces writing out
-    /// `Node { expr: leaf, _marker: PhantomData }` by hand, which used to be the
-    /// only way to supply one. [`var_leaf!`](crate::var_leaf) generates such a
-    /// leaf for one attribute.
+    /// through [`Node::new`] cannot. [`var_leaf!`](crate::var_leaf) generates such
+    /// a leaf for one attribute.
+    ///
+    /// This is the only way to build a node from a leaf you wrote. `Node`'s
+    /// `_marker` field is private, so the `Node { expr, _marker: PhantomData }`
+    /// literal that 0.2 accepted no longer compiles — the migration is to write
+    /// `Node::from_expr(leaf)` and drop the marker from the call. The built-in
+    /// leaves keep their own constructors, so a leaf never has to be named by
+    /// hand at all: [`Node::lit`] for a constant, [`Node::new`] for a variable.
     ///
     /// No bounds on `N`, `C`, or `E`: the constructor only stores the leaf, and
     /// every way of using the node — `eval`, the operators, `Display` — asks for
     /// the bound it needs itself. That is what makes this the constructor the
     /// crate can always reach: `impl Clone for Node` has no `C: Context` in
     /// scope, and builds through here.
-    ///
-    /// **Why `_marker` is still `pub`.** This is the only reason the field is
-    /// public: a `Node { expr, _marker }` literal written before this constructor
-    /// existed keeps compiling. The field is `#[doc(hidden)]`, so the rendered
-    /// docs show only `expr` and never advertise it — build through `from_expr`
-    /// rather than writing the literal in new code. The compatibility promise is
-    /// pinned by `tests/public_marker.rs`, which writes the literal from a
-    /// separate crate, so making the field private fails that test instead of
-    /// passing unnoticed.
     #[inline(always)]
     pub fn from_expr(expr: E) -> Self {
         Self {
@@ -182,9 +177,9 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 /// [`Expr`](crate::expr::Expr) whose dependency key is its own `TypeId` and whose
 /// [`Display`](std::fmt::Display) name is its own.
 ///
-/// Read as: make a leaf called `$name`, whose value is a `$value`, read out of
-/// `$ctx`, by running the body of `|$bind| ..` against the context item. Hand the
-/// leaf to [`Node::from_expr`] to get a node.
+/// Read as: make a leaf called `$name`, visible as `$vis`, whose value is a
+/// `$value`, read out of `$ctx`, by running the body of `|$bind| ..` against the
+/// context item. Hand the leaf to [`Node::from_expr`] to get a node.
 ///
 /// Why a type per attribute rather than a closure: a variable built with
 /// [`Node::new`] reports the key of `VarExpr<N, C>`, so every variable of one
@@ -203,11 +198,11 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 ///
 /// # Attributes on the generated item
 ///
-/// A slot for attributes sits ahead of the name, inside the parentheses, and what
-/// is written there is attached to the generated struct. That is how a crate under
-/// `#![deny(missing_docs)]` documents an item it never wrote by hand — without an
-/// attribute such a crate fails on the generated struct with `missing
-/// documentation for a struct`:
+/// A slot for attributes sits ahead of the visibility and the name, inside the
+/// parentheses, and what is written there is attached to the generated struct.
+/// That is how a crate under `#![deny(missing_docs)]` documents an item it never
+/// wrote by hand — without an attribute such a crate fails on the generated
+/// struct with `missing documentation for a struct`:
 ///
 /// ```
 /// # use express_it::prelude::*;
@@ -216,7 +211,7 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 /// # impl Context for GameCtx { type ContextItem<'w, 's> = Stats; }
 /// var_leaf!(
 ///     #[doc = "The target's current hit points."]
-///     Health,
+///     pub Health,
 ///     f32,
 ///     GameCtx,
 ///     |ctx| ctx.hp
@@ -226,19 +221,47 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 /// assert_eq!(node.eval(&Stats { hp: 61.0 }), 61.0);
 /// ```
 ///
-/// The attributes have to be inside the parentheses. Written in front of the whole
-/// call — `#[doc = ".."] var_leaf!(..);` — they belong to the macro invocation and
-/// not to what it expands to, so rustc warns `unused doc comment` and
-/// `missing_docs` still fires. The `///` sugar only exists in item position, so the
-/// unsugared `#[doc = ".."]` is what goes in the slot; `#[allow(..)]` and friends
-/// go there the same way. A call with no attributes matches exactly as it always
-/// has, so nothing written against the macro so far needs editing.
+/// The attributes have to be inside the parentheses, and they come first — ahead
+/// of the visibility. Written in front of the whole call —
+/// `#[doc = ".."] var_leaf!(..);` — they belong to the macro invocation and not to
+/// what it expands to, so rustc warns `unused doc comment` and `missing_docs`
+/// still fires. The `///` sugar only exists in item position, so the unsugared
+/// `#[doc = ".."]` is what goes in the slot; `#[allow(..)]` and friends go there
+/// the same way.
 ///
-/// There is no visibility slot, and one is deliberately not added: putting
-/// `$vis:vis` ahead of `$name` would silently turn today's generated `pub` items
-/// private for every caller who writes a bare call. If configurable visibility is
-/// ever wanted, it should arrive as an extra macro arm with this one still
-/// generating `pub`.
+/// # Visibility is part of the call
+///
+/// `var_leaf!` takes a visibility. As of 0.3 every call writes one between the
+/// attributes and the name, and the generated struct carries exactly what is
+/// written there — the macro inserts none of its own. `pub` for an outward-facing
+/// leaf, `pub(crate)` for one the crate keeps to itself, `pub(super)` for the
+/// parent module. An empty visibility, written as no token at all, makes the leaf
+/// private to the module the call sits in.
+///
+/// ```
+/// # use express_it::prelude::*;
+/// # struct Stats { hp: f32 }
+/// # struct GameCtx;
+/// # impl Context for GameCtx { type ContextItem<'w, 's> = Stats; }
+/// var_leaf!(pub Health, f32, GameCtx, |ctx| ctx.hp);
+/// var_leaf!(pub(crate) Regen, f32, GameCtx, |ctx| ctx.hp / 2.0);
+/// var_leaf!(Shadow, f32, GameCtx, |ctx| ctx.hp * 2.0);
+///
+/// let stats = Stats { hp: 3.0 };
+/// assert_eq!(Node::<f32, GameCtx, _>::from_expr(Health).eval(&stats), 3.0);
+/// assert_eq!(Node::<f32, GameCtx, _>::from_expr(Regen).eval(&stats), 1.5);
+/// assert_eq!(Node::<f32, GameCtx, _>::from_expr(Shadow).eval(&stats), 6.0);
+/// ```
+///
+/// This is where the call shape changed for 0.3. The macro used to emit
+/// `pub struct` whatever the call said, which handed every caller a public item —
+/// including the ones writing a private helper or an integration test. Nothing is
+/// inserted on your behalf now, and a 0.2 call still parses, because an empty
+/// visibility matches: `var_leaf!(Health, ..)` generates a *private* leaf where
+/// 0.2 generated a `pub` one. A 0.2 call that wanted a public leaf therefore has
+/// to gain the token — `var_leaf!(pub Health, f32, GameCtx, |ctx| ctx.hp)` — and
+/// nothing reports the omission until the first use from outside the leaf's own
+/// module, which reports `E0603` (*struct `Health` is private*).
 ///
 /// # The generated fetch, and what it cannot reach
 ///
@@ -292,8 +315,8 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 ///     type ContextItem<'w, 's> = Stats;
 /// }
 ///
-/// var_leaf!(Health, f32, GameCtx, |ctx| ctx.hp);
-/// var_leaf!(Attack, f32, GameCtx, |ctx| ctx.attack);
+/// var_leaf!(pub Health, f32, GameCtx, |ctx| ctx.hp);
+/// var_leaf!(pub Attack, f32, GameCtx, |ctx| ctx.attack);
 ///
 /// fn keys<N, C: Context, E: Expr<N, C>>(node: &Node<N, C, E>) -> HashSet<TypeId> {
 ///     let mut deps = HashSet::new();
@@ -323,10 +346,10 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 /// ```
 #[macro_export]
 macro_rules! var_leaf {
-    ($(#[$meta:meta])* $name:ident, $value:ty, $ctx:ty, |$bind:ident| $body:expr) => {
+    ($(#[$meta:meta])* $vis:vis $name:ident, $value:ty, $ctx:ty, |$bind:ident| $body:expr) => {
         $(#[$meta])*
         #[derive(Clone, Copy)]
-        pub struct $name;
+        $vis struct $name;
 
         impl $crate::expr::Expr<$value, $ctx> for $name {
             // The body goes here rather than into a stored closure: the context
@@ -651,7 +674,8 @@ mod tests {
     }
 
     // The same two leaves through the macro, so the generated impl is exercised
-    // in-crate as well as from the integration tests.
+    // in-crate as well as from the integration tests. No visibility modifier: each
+    // leaf is named only by the test below, in this same module.
     var_leaf!(ProbeAttack, f32, Ctx, |_ctx| 10.0f32);
     var_leaf!(ProbeDefense, f32, Ctx, |_ctx| 2.0f32);
 

@@ -46,7 +46,22 @@ macro_rules! impl_cmp_method {
         pub struct $node_name<N, L, R> {
             pub lhs: L,
             pub rhs: R,
-            pub _marker: std::marker::PhantomData<N>,
+            // Carries `N`, which the struct otherwise would not mention: the value
+            // type comes from the operands' `Expr<N, C>` impls, not from a field.
+            _marker: std::marker::PhantomData<N>,
+        }
+
+        impl<N, L, R> $node_name<N, L, R> {
+            // The constructor is the only way to name the marker: `N` cannot be
+            // read off the operands, it is settled by the `Expr<N, C>` impls the
+            // two of them happen to satisfy.
+            pub fn new(lhs: L, rhs: R) -> Self {
+                Self {
+                    lhs,
+                    rhs,
+                    _marker: std::marker::PhantomData,
+                }
+            }
         }
 
         impl<N: $bound, C: Context, L, R> Expr<bool, C> for $node_name<N, L, R>
@@ -88,14 +103,7 @@ macro_rules! impl_cmp_method {
 
             #[inline(always)]
             fn $method_name(self, rhs: R) -> Self::Output {
-                // The `_marker` below belongs to the generated comparison node, a
-                // different type that keeps its own marker field; only the `Node`
-                // literal is replaced by `from_expr`.
-                $crate::nodes::Node::from_expr($node_name {
-                    lhs: self.expr,
-                    rhs: rhs.as_expr(),
-                    _marker: std::marker::PhantomData,
-                })
+                $crate::nodes::Node::from_expr($node_name::new(self.expr, rhs.as_expr()))
             }
         }
     };

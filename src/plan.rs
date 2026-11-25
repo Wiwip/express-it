@@ -233,7 +233,28 @@ pub struct AssignmentStep<N: 'static, E, S> {
     pub setter_fn: S,
     pub expr: E,
     pub cache_key: Option<String>,
-    pub _marker: PhantomData<N>,
+    // Carries `N`, the value type this step writes. It is not a field type — the
+    // expression and the setter both mention it indirectly — so nothing but this
+    // marker pins it, and [`AssignmentStep::new`] is the only way to name it.
+    _marker: PhantomData<N>,
+}
+
+impl<N: 'static, E, S> AssignmentStep<N, E, S> {
+    /// Builds an assignment step: `expr` is evaluated, handed to `setter_fn`, and
+    /// cloned into the run cache under `cache_key` when there is one.
+    ///
+    /// [`save!`](crate::save) is the shorter spelling of the same step. Writing a
+    /// `AssignmentStep { setter_fn, expr, cache_key, _marker }` literal is not an
+    /// option any more — `_marker` became private, so this constructor is the
+    /// route for a step built outside the crate.
+    pub fn new(setter_fn: S, expr: E, cache_key: Option<String>) -> Self {
+        Self {
+            setter_fn,
+            expr,
+            cache_key,
+            _marker: PhantomData,
+        }
+    }
 }
 
 // Hand-written so the bounds land on the payload types only. There is no `Copy`
@@ -241,12 +262,11 @@ pub struct AssignmentStep<N: 'static, E, S> {
 // the bounds say.
 impl<N: 'static, E: Clone, S: Clone> Clone for AssignmentStep<N, E, S> {
     fn clone(&self) -> Self {
-        Self {
-            setter_fn: self.setter_fn.clone(),
-            expr: self.expr.clone(),
-            cache_key: self.cache_key.clone(),
-            _marker: PhantomData,
-        }
+        Self::new(
+            self.setter_fn.clone(),
+            self.expr.clone(),
+            self.cache_key.clone(),
+        )
     }
 }
 
@@ -341,20 +361,12 @@ where
 #[macro_export]
 macro_rules! save {
     ($ctx_ty:ty, $field:ident, $expr:expr) => {{
-        $crate::plan::AssignmentStep {
-            setter_fn: |ctx: &mut $ctx_ty, val| ctx.$field = val,
-            expr: $expr,
-            cache_key: None,
-            _marker: std::marker::PhantomData,
-        }
+        let setter_fn = |ctx: &mut $ctx_ty, val| ctx.$field = val;
+        $crate::plan::AssignmentStep::new(setter_fn, $expr, None)
     }};
     ($ctx_ty:ty, $field:ident, $expr:expr, $key:expr) => {{
-        $crate::plan::AssignmentStep {
-            setter_fn: |ctx: &mut $ctx_ty, val| ctx.$field = val,
-            expr: $expr,
-            cache_key: Some($key.to_string()),
-            _marker: std::marker::PhantomData,
-        }
+        let setter_fn = |ctx: &mut $ctx_ty, val| ctx.$field = val;
+        $crate::plan::AssignmentStep::new(setter_fn, $expr, Some($key.to_string()))
     }};
 }
 

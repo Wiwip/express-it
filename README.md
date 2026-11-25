@@ -231,8 +231,11 @@ variables are therefore indistinguishable to a dependency-driven invalidation la
 Give each attribute its own leaf type and the keys separate. `var_leaf!` declares
 one — a zero-sized `Expr` implementor whose `get_dependencies` inserts its own
 `TypeId` and whose `Display` prints its own name — and `Node::from_expr` makes a node
-out of it. The fourth argument is the fetch, `|ctx| ..`, with `ctx` bound to a
-reference to your context item:
+out of it. The name is written with the visibility the leaf should have (`pub` here,
+`pub(crate)`, `pub(super)`, or nothing for a leaf private to its module); the macro
+inserts no visibility of its own, so a call that names none now generates a private
+leaf where 0.2 generated a `pub` one. The last argument is the fetch, `|ctx| ..`,
+with `ctx` bound to a reference to your context item:
 
 ```rust
 use express_it::prelude::*;
@@ -250,8 +253,8 @@ impl Context for GameCtx {
     type ContextItem<'w, 's> = Stats;
 }
 
-var_leaf!(Health, f32, GameCtx, |ctx| ctx.health);
-var_leaf!(Attack, f32, GameCtx, |ctx| ctx.attack);
+var_leaf!(pub Health, f32, GameCtx, |ctx| ctx.health);
+var_leaf!(pub Attack, f32, GameCtx, |ctx| ctx.attack);
 
 fn keys<N, C: Context, E: Expr<N, C>>(node: &Node<N, C, E>) -> HashSet<TypeId> {
     let mut deps = HashSet::new();
