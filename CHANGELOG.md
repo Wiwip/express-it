@@ -8,6 +8,9 @@ and in `cargo doc --open`; this file only records what moved between releases.
 
 All additive except where noted.
 
+* Dual licensed MIT OR Apache-2.0, so `cargo publish` is no longer blocked by a
+  missing licence. `LICENSE-MIT` and `LICENSE-APACHE` carry the texts.
+
 * `Node::from_expr(expr)` builds a node from a leaf the caller wrote. It takes no
   `Expr` bound, since storing a leaf asks for none. Writing
   `Node { expr, _marker: PhantomData }` still compiles — `Node`'s `_marker` field

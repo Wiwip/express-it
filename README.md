@@ -301,7 +301,16 @@ cargo bench                     # the four criterion suites
 
 ## License
 
-No license has been granted for this crate. The manifest carries no `license` field
-and there is no `LICENSE` file, so nothing here grants permission to copy,
-distribute, or modify it: treat the source as all rights reserved. The question is
-open with the repository owner, and this section is where the answer will appear.
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
+  <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in this crate by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.
