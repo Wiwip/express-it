@@ -670,14 +670,39 @@ mod tests {
 
     #[test]
     fn test_literal_node_is_copy() {
+        // Assigning `a` to `b` and then using `a` again is the Copy check: a move
+        // would not compile. Both halves are then wrapped in a node and evaluated,
+        // so what was copied is a working node rather than a value that merely
+        // exists.
+        fn assert_copy<T: Copy>() {}
+
         let a = LiteralNode { value: 1i32 };
-        let _ = a;
+        assert_copy::<LiteralNode<i32>>();
+        let b = a;
+
+        let left: Node<i32, Ctx, _> = Node::from_expr(a);
+        let right: Node<i32, Ctx, _> = Node::from_expr(b);
+        assert_eq!(left.eval(&()), 1);
+        assert_eq!(right.eval(&()), 1);
+        assert_eq!(left.eval(&()), right.eval(&()));
+        assert_eq!(left.to_string(), right.to_string());
     }
 
     #[test]
     fn test_variable_node_is_copy() {
+        fn assert_copy<T: Copy>() {}
+
         let a: Node<i32, Ctx, _> = Node::new(|()| 4i32);
-        let _ = a;
+        assert_copy::<VarExpr<i32, Ctx>>();
+        assert_copy::<Node<i32, Ctx, VarExpr<i32, Ctx>>>();
+        let b = a;
+
+        assert_eq!(a.eval(&()), 4);
+        assert_eq!(b.eval(&()), 4);
+        // The copy is the same variable: same value, same key, same rendering.
+        assert_eq!(a.eval(&()), b.eval(&()));
+        assert_eq!(a.dependencies(), b.dependencies());
+        assert_eq!(a.to_string(), b.to_string());
     }
 
     #[test]
@@ -689,9 +714,18 @@ mod tests {
 
     #[test]
     fn test_cast_node_is_copy() {
+        fn assert_copy<T: Copy>() {}
+
         let inner = LiteralNode { value: 3i32 };
         let node = CastNode::<i32, f32, Ctx, _>::new(inner);
-        let _ = node;
+        assert_copy::<CastNode<i32, f32, Ctx, LiteralNode<i32>>>();
+        let copied = node;
+
+        assert_eq!(node.eval(&()), 3.0f32);
+        assert_eq!(copied.eval(&()), 3.0f32);
+        // Bits, so the comparison holds for a cast whose result is NaN.
+        assert_eq!(node.eval(&()).to_bits(), copied.eval(&()).to_bits());
+        assert_eq!(node.to_string(), copied.to_string());
     }
 
     #[test]

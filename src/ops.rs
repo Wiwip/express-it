@@ -416,7 +416,7 @@ impl_trinary_method!(ExprClamp, clamp, FloatClampNode, Float);
 mod tests {
     use super::*;
     use crate::dep_probe::{Attack, Defense, Haste, ProbeCtx, attr, key, keys, set};
-    use crate::expr::{AsExpression, Context, Expr};
+    use crate::expr::{AsExpression, Context, Expr, StoredExpr};
     use crate::logic::{ExprCmpGe, ExprLogicalAnd, ExprLogicalOr};
     use crate::nodes::Node;
 
@@ -716,8 +716,44 @@ mod tests {
 
     #[test]
     fn test_many_node_tree_no_stack_overflow() {
-        let cur: Node<i32, Ctx, _> = Node::lit(1);
-        assert_eq!(cur.eval(&()), 1);
+        // Four thousand nested nodes, one `+ 1` at a time. Each step is boxed,
+        // because without type erasure the Rust type would deepen with every `+` and
+        // a loop could not build the chain at all. `eval`, the dependency walk and
+        // the recursive drop all have to cross that depth, and the sum is checked
+        // too — a shortcut that stops walking early gets the wrong total rather than
+        // a silent pass.
+        let mut sum = erase(Node::lit(0));
+        for _ in 0..4_000 {
+            sum = erase(sum + 1);
+        }
+        assert_eq!(sum.eval(&()), 4_000);
+        assert!(
+            sum.dependencies().is_empty(),
+            "a chain of literals reads nothing"
+        );
+
+        // The same depth hanging off a variable at the bottom, so the leaf is
+        // reached through every frame rather than sitting at the tip.
+        let mut from_var = erase(Node::new(|()| 1));
+        for _ in 0..4_000 {
+            from_var = erase(from_var * 1);
+        }
+        assert_eq!(from_var.eval(&()), 1);
+        assert_eq!(
+            from_var.dependencies().len(),
+            1,
+            "the one variable below the chain"
+        );
+    }
+
+    /// Wraps a node's payload in the crate's own type-erasing box, so a tree can be
+    /// deepened in a loop rather than in the type system. Evaluation, keys and
+    /// display all forward through the box unchanged.
+    fn erase<N, E: Expr<N, Ctx> + Send + Sync + 'static>(
+        node: Node<N, Ctx, E>,
+    ) -> Node<N, Ctx, StoredExpr<N, Ctx>> {
+        let boxed: StoredExpr<N, Ctx> = Box::new(node.expr);
+        Node::from_expr(boxed)
     }
 
     #[test]
