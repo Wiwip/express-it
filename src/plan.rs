@@ -379,6 +379,11 @@ macro_rules! save {
 ///
 /// Usage:
 ///   let plan = plan.step(save_cache!("my_key", Node::lit(42)));
+///
+/// The key is a `&'static str` — a literal, a `const`, or a leaked `String` —
+/// unlike the owned key the four-argument `save!` accepts and `load_cache!`
+/// looks up with. A key built at run time gives `E0597` here; the 0.3.0 release
+/// notes list this as a known inconsistency.
 #[macro_export]
 macro_rules! save_cache {
     ($key:expr, $expr:expr) => {{
@@ -399,6 +404,10 @@ macro_rules! save_cache {
 /// A lookup is the step that can fail a run: a missing key is
 /// [`PlanError::CacheMiss`] and a key holding another type is
 /// [`PlanError::CacheTypeMismatch`].
+///
+/// The key is anything `Into<String>`, so an owned, run-time key works here even
+/// though `save_cache!` and [`Node::alias`](crate::nodes::Node::alias) demand
+/// `&'static str`.
 #[macro_export]
 macro_rules! load_cache {
     ($ty:ty, $key:expr) => {{ $crate::plan::CacheLookupStep::<$ty>::new($key) }};

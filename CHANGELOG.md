@@ -11,9 +11,9 @@ from this repository — there is no tag, and `cargo publish` answers that quest
 only against the index — so the migrations below are written for a caller building
 from `main` at or before the 0.2.0 commits rather than for somebody upgrading a
 registry dependency. What *is* checkable here is that `var_leaf!` and
-`Node::from_expr` were added during this cycle and are in no earlier state of the
-branch, which is why they appear under *Added* and not as breaks: no earlier form
-of either existed to migrate from.
+`Node::from_expr` were added during this cycle and are in no state of the branch
+before it, which is why they appear under *Added* and not as breaks: no earlier
+form of either existed to migrate from.
 
 ### Breaking
 
@@ -130,6 +130,16 @@ and `VarExpr::with_key` constructors, which cannot drift like this again.
   about a manifest with no `license` and packages anyway — measured, exit 0 — so
   this is a licensing decision rather than a packaging fix, and the CI job
   asserts the field and both texts because cargo itself will not.
+* The centre of the API now has documentation. `Context`, `ContextMut`,
+  `ContextMut::as_readonly`, `Expr::eval`, `AsExpression` and its `Target`, all
+  five public modules, `Node::lit`, `Node::alias` and `Node::expr` were bare
+  declarations before, and `as_readonly` is the one signature a user has to get
+  exactly right: three named lifetimes, with `'a` and `'s` — not `'w` — in the
+  return type. Writing it with `'_` instead gives `E0106` plus `E0195` and points
+  nowhere useful, so the trait page now carries a working implementation and a
+  `compile_fail` example of the elided form. Three more `compile_fail` examples
+  pin the `Send + Sync` bound on `Context` (an `Rc<RefCell<_>>` inside a context
+  is `E0277`) and the cache-key lifetime rule below.
 
 ### Documented, not changed
 
@@ -139,10 +149,40 @@ element is applied, so elements never observe each other's writes, and a
 That behaviour predates this release and is unchanged; what was missing was the
 saying, since "applied in declaration order" invited the opposite reading.
 
+### Known limitations
+
+Recorded here because a caller meets all three, and none of them is fixed in this
+release — they are documented, and each has a note at the item that raises it.
+
+* **Cache keys come in two lifetimes.** `save_cache!` and `Node::alias` take
+  `&'static str`; the four-argument `save!`, `load_cache!` and `PlanCache` all
+  take an owned key. A key built at run time therefore compiles for the lookup and
+  fails for the store with `E0597` — the borrow does not live long enough — which is the
+  obvious thing to try when a key is derived from an entity id. The split is not
+  new in 0.3.0: both halves trace to the first commit of the current design. It
+  is an API inconsistency, so it is left for a release that may break, and the
+  workaround meanwhile is a literal, a `const`, or `Box::leak`.
+* **`Context: Send + Sync`.** A context holding `Rc<RefCell<_>>` is rejected with
+  `E0277`, so a single-threaded host must use `Arc<Mutex<_>>` or `Arc<RwLock<_>>`.
+  The bound has been there since well before 0.2.0 but was stated nowhere until
+  now; anyone pinning an older checkout will find it unannounced in the source.
+* **A boxed sub-expression cannot be displayed.** `Display` for `Node` asks its
+  payload to be `Display`, and `Box<dyn Expr>` is not, so a tree deepened through
+  `erase()` evaluates and reports dependencies but will not print. Documented on
+  both the helper and `StoredExpr`.
+
+The crate also does not yet enforce its own documentation: `RUSTFLAGS="-W
+missing_docs" cargo check` reports 150 warnings, down from 167 in this cycle, and
+almost all of them are the macro-generated node structs and operator traits rather
+than hand-written API. Turning the lint on in `src/lib.rs` would fail CI at once,
+so it is left off; 150 is the number to drive down before it goes on.
+
 ### Verification
 
-`cargo test` on 0.3.0 runs 179 tests: 121 unit, 7 macro hygiene, 6 plan, 12
-prelude, 18 property, 3 stored-expression and 12 doctests. The
+`cargo test` on 0.3.0 runs 183 tests: 121 unit, 7 macro hygiene, 6 plan, 12
+prelude, 18 property, 3 stored-expression and 16 doctests. Four of the doctests
+are `compile_fail`, pinning the errors the documentation promises rather than the
+values it promises. The
 property suite checks dependency monotonicity across every combinator family (a
 composite reports its operands' keys and nothing more), the coexistence of the
 two key kinds, plan prefix-application on failure, and that `cast` agrees with

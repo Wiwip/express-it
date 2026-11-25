@@ -1,9 +1,34 @@
 #![doc = include_str!("../README.md")]
 
+/// The traits everything else is built on.
+///
+/// [`Expr`](expr::Expr) is what a tree node does, [`Context`](expr::Context) and
+/// [`ContextMut`](expr::ContextMut) say what it reads and what a plan may write,
+/// [`AsExpression`](expr::AsExpression) decides what an operand may be, and
+/// [`Deps`](expr::Deps)/[`DepKey`](expr::DepKey) are the sink a node reports its
+/// dependencies into.
 pub mod expr;
+/// Comparison and boolean structure: the `.lt()`/`.le()`/`.gt()`/`.ge()`/`.eq()`
+/// nodes, the `.and()`/`.or()`/`.not()` … combinators, and the `any!`/`all!`
+/// macros.
+///
+/// Every combinator here requires its operands to be `Copy`, which is why a
+/// boxed sub-expression can be arithmetic but not logic.
 pub mod logic;
+/// The tree itself: [`Node`](nodes::Node), the leaves it is built from
+/// ([`LiteralNode`](nodes::LiteralNode), [`VarExpr`](nodes::VarExpr)), the
+/// constructors (`lit`, `new`, `var`, `from_expr`), the `var_leaf!` macro, the
+/// `cast` conversions, and the cache-save step.
 pub mod nodes;
+/// Arithmetic: the `+ - * / %` operator impls on `Node` (including a primitive on
+/// the left), and the method nodes `powf`, `min`, `max`, `abs`, `sqrt`, `acos`,
+/// `clamp`.
+///
+/// There are no public items in this module; it exists to hold the impls.
 pub mod ops;
+/// Ordered side effects: [`Plan`](plan::Plan), the step types, the
+/// [`PlanCache`](plan::PlanCache), [`PlanError`](plan::PlanError), and the
+/// `save!` / `save_cache!` / `load_cache!` macros.
 pub mod plan;
 
 /// Everything needed to build, compose, and run an expression, in one import.

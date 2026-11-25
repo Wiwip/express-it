@@ -3,13 +3,112 @@ use std::any::TypeId;
 use std::collections::HashSet;
 use std::fmt;
 
+/// Which state a tree reads, and the guarantee that it can be shared.
+///
+/// Implement it for the type that owns your game state. The single associated
+/// type is the *read view* a leaf is handed when it evaluates —
+/// `Expr::eval(&self, ctx: &C::ContextItem<'_, '_>)`.
+///
+/// `ContextItem` is a generic associated type so a context can hand out a borrow
+/// of its state (`&'w State`) instead of a copy of it. A context whose read view
+/// is the state by value simply ignores both parameters, which is what every
+/// example in this crate does.
+///
+/// The trait requires `Send + Sync`, so the *context type* must be safe to share
+/// between threads. Single-threaded interior mutability is therefore rejected:
+///
+/// ```compile_fail
+/// use express_it::prelude::*;
+/// use std::{cell::RefCell, rc::Rc};
+///
+/// struct SingleThreaded(Rc<RefCell<f32>>);
+///
+/// impl Context for SingleThreaded {
+///     type ContextItem<'w, 's> = f32;
+/// }
+/// ```
+///
+/// fails with `E0277: Rc<RefCell<f32>> cannot be shared between threads safely`.
+/// `Arc<Mutex<T>>` and `Arc<RwLock<T>>` are fine. The bound is on the context
+/// type alone; the read view it hands out carries no such requirement.
 pub trait Context: Send + Sync {
+    /// The read view handed to every leaf during one evaluation.
     type ContextItem<'w, 's>;
 }
 
+/// The write side, needed only by plan steps that change state.
+///
+/// Trees never see it: `eval` takes a read view. [`Plan`](crate::plan::Plan)
+/// needs it, because a [`save!`](crate::save!) step writes and the steps
+/// after it read — which is what lets one plan both evaluate an expression and
+/// store its value.
 pub trait ContextMut: Context {
+    /// The write view a plan step receives.
     type ContextItemMut<'w, 's>;
 
+    /// Projects a write view to a read view without consuming it.
+    ///
+    /// Copy the declared shape verbatim — three named lifetimes, with `'a` and
+    /// `'s` (not `'w` and `'s`) in the return type:
+    ///
+    /// ```
+    /// use express_it::prelude::*;
+    ///
+    /// #[derive(Clone, Copy)]
+    /// struct State {
+    ///     hp: f32,
+    /// }
+    ///
+    /// struct Ctx;
+    ///
+    /// impl Context for Ctx {
+    ///     type ContextItem<'w, 's> = State;
+    /// }
+    ///
+    /// impl ContextMut for Ctx {
+    ///     type ContextItemMut<'w, 's> = State;
+    ///
+    ///     fn as_readonly<'w, 's, 'a>(
+    ///         mut_item: &'a Self::ContextItemMut<'w, 's>,
+    ///     ) -> Self::ContextItem<'a, 's> {
+    ///         *mut_item
+    ///     }
+    /// }
+    ///
+    /// let state = State { hp: 3.0 };
+    /// assert_eq!(Ctx::as_readonly(&state).hp, 3.0);
+    /// ```
+    ///
+    /// Eliding those lifetimes into `'_` does not compile, and the errors do not
+    /// point at the cause: the signature below gives `E0106: missing lifetime
+    /// specifiers` together with `E0195: lifetime parameters or bounds … do not
+    /// match the trait declaration`.
+    ///
+    /// ```compile_fail
+    /// # use express_it::prelude::*;
+    /// # #[derive(Clone, Copy)] struct State { hp: f32 }
+    /// struct Ctx;
+    ///
+    /// impl Context for Ctx {
+    ///     type ContextItem<'w, 's> = State;
+    /// }
+    ///
+    /// impl ContextMut for Ctx {
+    ///     type ContextItemMut<'w, 's> = State;
+    ///
+    ///     fn as_readonly(
+    ///         item: &Self::ContextItemMut<'_, '_>,
+    ///     ) -> Self::ContextItem<'_, '_> {
+    ///         *item
+    ///     }
+    /// }
+    /// # fn _unused() {}
+    /// ```
+    ///
+    /// A `write view` that borrows (`type ContextItemMut<'w, 's> = &'w mut State;`)
+    /// is judged even more strictly, because the compiler compares which of the
+    /// three lifetimes actually appear in the signature: keeping the declared
+    /// names is what makes the impl match.
     fn as_readonly<'w, 's, 'a>(
         mut_item: &'a Self::ContextItemMut<'w, 's>,
     ) -> Self::ContextItem<'a, 's>;
@@ -81,6 +180,15 @@ pub trait ContextMut: Context {
 /// assert!(!deps.contains_name("hp"), "a type key is not a name key");
 /// ```
 pub trait Expr<N, C: Context> {
+    /// Produces this node's value from one read view of the context.
+    ///
+    /// Two properties a leaf must keep. It must not change anything: a leaf that
+    /// mutated state would make a cached or repeated `eval` disagree with the
+    /// first one. And it is allowed to read *less* than it declared, because
+    /// short-circuiting skips children — `a && b` never evaluates `b` once `a` is
+    /// false, while `get_dependencies` still reports both. Reading more than the
+    /// declared keys is the one thing that breaks a watcher, and it is the
+    /// contract stated below.
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N;
 
     /// Collects the dependency keys of every leaf reachable from this node.
@@ -367,7 +475,20 @@ impl<N, C: Context, E: Expr<N, C> + ?Sized> Expr<N, C> for Box<E> {
     }
 }
 
+/// What an operator operand may be.
+///
+/// Every operator takes `impl AsExpression<..>` on the right-hand side, and
+/// exactly two shapes implement it: a [`Node`], which contributes the leaf it
+/// already holds, and any Rust primitive (`f32`, `f64`, the integers, `bool`,
+/// `char`), which is lifted into a [`LiteralNode`]. That is what makes
+/// `health * 1.5` and `health * other_node` both compile without a helper
+/// function or a `From` impl at the call site.
 pub trait AsExpression<N, C: Context> {
+    /// The leaf the operand turns into inside the node being built: a [`Node`]'s
+    /// own payload, or a [`LiteralNode`] for a primitive.
+    ///
+    /// It carries `Send + Sync + 'static` because the tree that results may be
+    /// moved to another thread or held past this call.
     type Target: Expr<N, C> + Send + Sync + 'static;
 
     /// Consumes the wrapper and hands back the expression it holds.

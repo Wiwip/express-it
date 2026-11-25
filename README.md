@@ -171,6 +171,21 @@ fn main() {
 }
 ```
 
+## Two constraints to know before writing a context
+
+**A context must be `Send + Sync`.** `Context` carries that bound, so a context
+holding `Rc<RefCell<State>>` is refused with `E0277: cannot be shared between
+threads safely`. `Arc<Mutex<State>>` and `Arc<RwLock<State>>` are accepted, and
+the read view your leaves receive carries no such requirement.
+
+**Cache keys come in two types.** `save_cache!` and `Node::alias` want
+`&'static str`; `save!`, `load_cache!` and `PlanCache` take an owned key. A key
+computed at run time therefore compiles on the lookup side and fails on the store
+side with `E0597` — the borrow does not live long enough. Pass a literal or a `const`, or
+`Box::leak` the string if the key is genuinely computed and the program outlives
+the plan. This inconsistency predates 0.3 and is listed under *Known limitations*
+in the release notes.
+
 ## Panics and failure semantics
 
 The plan layer never panics on value routing: a missing cache key, a key holding

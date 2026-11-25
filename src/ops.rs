@@ -747,8 +747,9 @@ mod tests {
     }
 
     /// Wraps a node's payload in the crate's own type-erasing box, so a tree can be
-    /// deepened in a loop rather than in the type system. Evaluation, keys and
-    /// display all forward through the box unchanged.
+    /// deepened in a loop rather than in the type system. Evaluation and dependency
+    /// keys forward through the box; display does not, because `Box<dyn Expr>` is
+    /// not `Display` and `impl Display for Node` asks its payload to be.
     fn erase<N, E: Expr<N, Ctx> + Send + Sync + 'static>(
         node: Node<N, Ctx, E>,
     ) -> Node<N, Ctx, StoredExpr<N, Ctx>> {

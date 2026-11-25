@@ -17,6 +17,11 @@ use std::marker::PhantomData;
 /// and evaluates it as the margin check; widening it is the way to find the limit
 /// on a given thread.
 pub struct Node<N, C, E> {
+    /// The leaf this node wraps.
+    ///
+    /// Public so a caller can keep or reuse the leaf itself; nothing about
+    /// building or evaluating a tree needs it. The marker beside it is private —
+    /// a node carrying a leaf of your own comes from [`Node::from_expr`].
     pub expr: E,
     // Carries the `N` and `C` parameters, which the struct otherwise would not
     // mention. Private as of 0.3: a caller supplies a leaf through
@@ -26,6 +31,30 @@ pub struct Node<N, C, E> {
 }
 
 impl<N: 'static + Clone, C: Context, E: Expr<N, C>> Node<N, C, E> {
+    /// Turns this node into a step that stores its value in the
+    /// [`PlanCache`](crate::plan::PlanCache) under `key` — the method form of
+    /// [`save_cache!`](crate::save_cache!).
+    ///
+    /// The key is `&'static str`, so it must be a literal, a `const`, or
+    /// otherwise outlive the whole program. A key built at run time will not
+    /// compile here — `E0597`, the borrow does not live long enough — even though
+    /// neighbouring [`save!`](crate::save!) and
+    /// [`load_cache!`](crate::load_cache!) both accept an owned `String`:
+    ///
+    /// ```compile_fail
+    /// # use express_it::prelude::*;
+    /// # struct State { v: f64 }
+    /// # struct Ctx;
+    /// # impl Context for Ctx { type ContextItem<'w, 's> = State; }
+    /// let key = String::from("per-run-slot");
+    /// let step = Node::<f64, Ctx, _>::lit(1.0).alias(key.as_str());
+    /// # let _ = step;
+    /// ```
+    ///
+    /// That asymmetry is a known wart of this API, not a design claim; see the
+    /// 0.3.0 release notes. Until it is closed, pass a literal, or leak the
+    /// string with `Box::leak` if the key really is computed and the program
+    /// lives as long as the plan.
     pub fn alias(self, key: &'static str) -> CacheSaveStep<N, C, E> {
         CacheSaveStep { key, expr: self }
     }
@@ -63,6 +92,12 @@ impl<N, C, E> Node<N, C, E> {
 }
 
 impl<N, C: Context> Node<N, C, LiteralNode<N>> {
+    /// A node holding a constant.
+    ///
+    /// The value's own type fixes the tree's value type, so `Node::lit(1.0f64)`
+    /// and `Node::lit(1.0f32)` are different trees. A primitive written directly
+    /// as an operand (`health * 2.0`) is lifted into this same leaf by
+    /// [`AsExpression`](crate::expr::AsExpression).
     #[inline(always)]
     pub fn lit(value: N) -> Self {
         Self::from_expr(LiteralNode { value })
@@ -168,7 +203,11 @@ impl<N: fmt::Display, C: Context, E: Expr<N, C> + fmt::Display> fmt::Display for
 /// Evaluates `expr` and stores the result in the PlanCache under `key`.
 /// Does NOT write to the context state — pure cache-only step.
 pub struct CacheSaveStep<N: 'static, C: Context, E> {
+    /// The cache slot to write. `&'static str`, so a literal or a leaked string:
+    /// a key built at run time does not compile here, unlike the owned keys
+    /// `save!` and `load_cache!` accept.
     pub key: &'static str,
+    /// The expression evaluated and stored; the context is never written.
     pub expr: Node<N, C, E>,
 }
 
