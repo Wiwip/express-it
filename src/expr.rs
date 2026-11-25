@@ -217,8 +217,9 @@ pub trait Expr<N, C: Context> {
     /// first one. And it is allowed to read *less* than it declared, because
     /// short-circuiting skips children — `a && b` never evaluates `b` once `a` is
     /// false, while `get_dependencies` still reports both. Reading more than the
-    /// declared keys is the one thing that breaks a watcher, and it is the
-    /// contract stated below.
+    /// declared keys is the one thing that breaks a consumer caching on these
+    /// keys — this crate ships no such consumer, only the keys for one — and it is
+    /// the contract stated below.
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N;
 
     /// Collects the dependency keys of every leaf reachable from this node.
