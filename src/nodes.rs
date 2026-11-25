@@ -4,6 +4,18 @@ use std::any::type_name;
 use std::fmt;
 use std::marker::PhantomData;
 
+/// An expression tree: a leaf `E` plus the value type `N` and context `C` it is
+/// read in.
+///
+/// Build one with [`Node::lit`], [`Node::new`], [`Node::var`] or
+/// [`Node::from_expr`], then compose it with the operators and the method nodes.
+///
+/// Everything the crate does over a tree is recursive — `eval`, the dependency
+/// walk behind [`Node::dependencies`], `Display`, and `Drop` each descend one
+/// frame per level — so a tree that is thousands of nodes deep along a single
+/// branch needs a stack that can hold it. `ops::tests` builds a 4,000-deep chain
+/// and evaluates it as the margin check; widening it is the way to find the limit
+/// on a given thread.
 pub struct Node<N, C, E> {
     pub expr: E,
     // Carries the `N` and `C` parameters, which the struct otherwise would not
@@ -783,8 +795,15 @@ mod tests {
         let as_i32 = Node::<f32, Ctx, _>::lit(3.7f32).cast::<i32>();
         let as_u8 = Node::<f32, Ctx, _>::lit(3.7f32).cast::<u8>();
 
-        assert_eq!(as_i32.to_string(), "cast::<i32>(3.7)");
-        assert_eq!(as_u8.to_string(), "cast::<u8>(3.7)");
+        // Built from `type_name` rather than hardcoded, because the exact
+        // rendering of a type name is not specified by Rust; what has to hold is
+        // that the target type appears and that two targets print differently.
+        let want_i32 = format!("cast::<{}>(3.7)", std::any::type_name::<i32>());
+        let want_u8 = format!("cast::<{}>(3.7)", std::any::type_name::<u8>());
+
+        assert_eq!(as_i32.to_string(), want_i32);
+        assert_eq!(as_u8.to_string(), want_u8);
+        assert_ne!(as_i32.to_string(), as_u8.to_string());
     }
 
     #[test]

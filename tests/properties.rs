@@ -1273,9 +1273,9 @@ proptest! {
 
     /// Property 10 — `cast` is total and reproduces Rust's `as`.
     ///
-    /// Seven primitive pairs, covering all five the docs promise (`f32`→`i32`,
-    /// `f64`→`u8`, `i32`→`u8`, `i64`→`i8`, `u32`→`i32`) plus int→float and
-    /// float→float, over arbitrary bit patterns — NaN and both infinities
+    /// Eight primitive pairs, covering all five the docs promise (`f32`→`i32`,
+    /// `f64`→`u8`, `i32`→`u8`, `i64`→`i8`, `u32`→`i32`) plus `f32`→`u64`,
+    /// int→float and float→float, over arbitrary bit patterns — NaN and both infinities
     /// included, since the documented promise is that NaN becomes `0` and
     /// out-of-range values saturate, never that a cast can panic. Catches `AsCast`
     /// drifting from `as` — a saturating pair written as a wrapping one, or a cast
@@ -1572,4 +1572,23 @@ fn a_runtime_string_can_be_queried_against_a_name_key() {
     let miss = String::from("attack");
     assert!(deps.iter().any(|k| k.as_name() == Some(hit.as_str())));
     assert!(!deps.iter().any(|k| k.as_name() == Some(miss.as_str())));
+}
+
+/// `impl Expr for Node` forwards the dependency walk into its payload. Nothing
+/// else in this file reaches it — `erase()` boxes `node.expr`, and
+/// `AsExpression` unwraps a node passed as an operand — so the impl is exercised
+/// here by using a `Node` as somebody else's leaf. A forward that stopped
+/// forwarding would otherwise be caught only by the in-crate unit tests.
+#[test]
+fn a_node_used_as_a_leaf_forwards_the_walk_to_its_payload() {
+    let inner = Node::<f64, Ctx, _>::var("hp", read_hp);
+    let outer = Node::from_expr(inner);
+
+    let deps = outer.dependencies();
+    assert_eq!(
+        deps.len(),
+        1,
+        "the outer node reports what the inner one reads"
+    );
+    assert!(deps.contains_name("hp"), "and reports it as a name key");
 }

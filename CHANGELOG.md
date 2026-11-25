@@ -6,13 +6,14 @@ and in `cargo doc --open`; this file only records what moved between releases.
 
 ## 0.3.0
 
-A breaking release, and the first one anyone can install: 0.2.0 was never
-published, because a missing `license` field blocked `cargo publish`, and that
-field is one of the additions below. So the two breaks listed first are written
-for a caller building from `main` at or before the 0.2.0 commits rather than for
-somebody upgrading a dependency from a registry — which is also why `var_leaf!`
-and `Node::from_expr` appear under *Added* and not as breaks: they were added
-during this cycle and no earlier form of them ever existed to migrate from.
+A breaking release. Whether 0.2.0 ever reached a registry cannot be established
+from this repository — there is no tag, and `cargo publish` answers that question
+only against the index — so the migrations below are written for a caller building
+from `main` at or before the 0.2.0 commits rather than for somebody upgrading a
+registry dependency. What *is* checkable here is that `var_leaf!` and
+`Node::from_expr` were added during this cycle and are in no earlier state of the
+branch, which is why they appear under *Added* and not as breaks: no earlier form
+of either existed to migrate from.
 
 ### Breaking
 
@@ -38,10 +39,12 @@ statement, `GreaterThanNode::new(a, b)` is `E0282: type annotations needed`, and
 so is `AssignmentStep::new(setter, expr, None)`. Inside `save!` or `.step()` the
 surrounding context fixes it and no turbofish is needed.
 
-`Node::lit`, `Node::new`, `Node::var`, every operator method and the `save!`,
+`Node::lit`, `Node::new`, every operator method and the `save!`,
 `save_cache!` and `load_cache!` macros are unchanged, so this only reaches code
 that wrote those literals by hand. `Node::expr` stays public for reading. A 0.2
-literal now fails with `E0451: field \`_marker\` of struct \`Node\` is private`.
+literal now fails with `E0451: field \`_marker\` of struct \`Node\` is private`,
+once the node's type is written down; with nothing to infer it from the compiler
+stops earlier, at `E0282: type annotations needed`.
 The marker fields of `CastNode`, `Plan` and `CacheLookupStep` were already
 private, so nothing changes there; `CacheSaveStep` has no marker field and both
 of its fields stay public, because `save_cache!` expands a
@@ -119,7 +122,14 @@ and `VarExpr::with_key` constructors, which cannot drift like this again.
   and `Plan::default();` used to be silent. The attribute sits on the type
   rather than on `new` and `step`, which is what covers `Default`, and clippy
   reports `double_must_use` if both are ever present again.
-* Dual MIT OR Apache-2.0 licensing, which also unblocks `cargo publish`.
+* `Node::var(name, fetch)` builds a variable whose dependency key is its name,
+  and `Node::dependencies()` hands back a `Deps` so a caller never builds a sink
+  by hand. Both are new in this cycle, which is also why `Node::new` needed no
+  change and still reports one shared key.
+* Dual MIT OR Apache-2.0 licensing, with the canonical texts. Cargo only *warns*
+  about a manifest with no `license` and packages anyway — measured, exit 0 — so
+  this is a licensing decision rather than a packaging fix, and the CI job
+  asserts the field and both texts because cargo itself will not.
 
 ### Documented, not changed
 
@@ -131,7 +141,8 @@ saying, since "applied in declaration order" invited the opposite reading.
 
 ### Verification
 
-`cargo test` on 0.3.0 runs 178 unit, integration, doc and property tests. The
+`cargo test` on 0.3.0 runs 179 tests: 121 unit, 7 macro hygiene, 6 plan, 12
+prelude, 18 property, 3 stored-expression and 12 doctests. The
 property suite checks dependency monotonicity across every combinator family (a
 composite reports its operands' keys and nothing more), the coexistence of the
 two key kinds, plan prefix-application on failure, and that `cast` agrees with

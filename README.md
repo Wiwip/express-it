@@ -195,7 +195,7 @@ These still panic:
 `cast` is the deliberate exception: `Node::cast::<T>()` is total and never panics.
 It performs Rust's `as` conversion, so `NaN` becomes `0`, out-of-range floats
 saturate to the target integer's min/max, and int-to-int casts wrap on two's
-complement (`(-1i32).cast::<u32>()` is `u32::MAX`).
+complement (`Node::<i32, Ctx, _>::lit(-1).cast::<u32>()` is `u32::MAX`).
 
 A panic inside an expression is not turned into a `PlanError`: `Plan::run` does not
 catch unwinding, so a `1 / 0` in a step's tree takes the process down with it just
@@ -312,7 +312,7 @@ var_leaf!(pub Attack, f32, GameCtx, |ctx| ctx.attack);
 let health = Node::<f32, GameCtx, _>::from_expr(Health);
 let attack = Node::<f32, GameCtx, _>::from_expr(Attack);
 
-// Two attributes, two type keys, and the tree reads by attribute name.
+// Two attributes, two type keys, and each leaf prints its own name.
 assert_ne!(health.dependencies(), attack.dependencies());
 assert!(health.dependencies().contains_type_of::<Health>());
 assert_eq!((health + attack).to_string(), "(Health + Attack)");

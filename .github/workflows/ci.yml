@@ -58,9 +58,10 @@ jobs:
       - name: Tests, release profile
         run: cargo test --release --all-features
 
-      # The generated cases are cheap, so one job pays for a deeper sweep than
-      # the default 300: an arithmetic or dependency-propagation bug that needs a
-      # particular bit pattern is unlikely to show at 300 cases.
+      # The generated cases are cheap, so one job pays for a deeper sweep than the
+      # 300 that `tests/properties.rs` configures (proptest's own default is 256):
+      # an arithmetic or dependency-propagation bug that needs a particular bit
+      # pattern is unlikely to show at 300 cases.
       - name: Deeper property sweep
         if: matrix.os == 'ubuntu-latest'
         env:

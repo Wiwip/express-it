@@ -30,17 +30,18 @@ pub trait ContextMut: Context {
 /// its type, the second from a name.
 ///
 /// Two things that are not two methods, but bite anyway. Composing a node with
-/// another needs `Copy` — the combinator methods require `Self: Copy` and
-/// [`AsExpression`] asks for `Clone + Send + Sync + 'static` — so a stateful leaf
-/// that cannot be `Copy` has to be held behind [`Box`], which is `Copy` by
-/// cloning the handle. And `get_dependencies` has a **default body that adds
-/// nothing**: correct for a literal, silently wrong for a composite, which then
-/// reports a strict *subset* of what it reads. That is the one direction the
-/// may-read contract below does not cover, and a watcher built from such a node
-/// is never told the tree is stale.
+/// another needs `Copy` — the comparison and logical combinator impls require
+/// `L: Expr<N, C> + Copy` — so a leaf that cannot be `Copy` can be held behind
+/// [`Box`], whose `Expr` impl forwards, which keeps it a usable tree payload and
+/// composable with the arithmetic operators; a box is never `Copy`, though, so it
+/// still cannot take `.lt()` or `.and()` — see [`StoredExpr`]. And
+/// `get_dependencies` has a **default body that adds nothing**: correct for a
+/// literal, silently wrong for a composite, which then reports a strict *subset*
+/// of what it reads. That is the one direction the may-read contract below does
+/// not cover, and a watcher built from such a node is never told the tree is
+/// stale.
 ///
 /// ```
-/// use express_it::expr::{DepKey, Deps};
 /// use express_it::prelude::*;
 ///
 /// struct Stats {
@@ -90,7 +91,7 @@ pub trait Expr<N, C: Context> {
     /// matters — `a && b` reports both operands even though a live `eval`
     /// short-circuits and never reads `b` once `a` is false. Arithmetic is exact
     /// about which *leaves the walk reaches*, by contrast: every arithmetic node
-    /// (`+ - * / %`, `powf`, `min`, `max`, `abs`, `sqrt`, `clamp(..)`, casts)
+    /// (`+ - * / %`, `powf`, `min`, `max`, `abs`, `sqrt`, `acos`, `clamp(..)`, casts)
     /// evaluates all of its children. It is not exact about which *attributes*
     /// exist, because two variables built through
     /// [`Node::new`](crate::nodes::Node::new) of one value type report one shared
