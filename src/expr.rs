@@ -40,7 +40,31 @@ pub trait Expr<N, C: Context> {
 
 pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
 
+/// A type-erased expression: the shape a tree holds when a sub-expression is
+/// chosen at runtime (or stored in a heterogeneous collection) instead of being
+/// named in the type.
+///
+/// One limitation follows from the box itself: it is never `Copy`, so a
+/// `StoredExpr` composes with the arithmetic operators and the method nodes
+/// (`max`, `clamp`, `sqrt`, …) but not with the comparison (`.ge()`, `.le()`, …)
+/// or logical (`.and()`, `.or()`, …) combinators, whose impls require
+/// `L: Expr<N, C> + Copy`.
 pub type StoredExpr<N, C> = Box<dyn Expr<N, C> + Send + Sync>;
+
+// Forwards through `Box` so the alias above composes into a tree: without it a
+// `StoredExpr` implements nothing and cannot be a `Node` payload, an operand of
+// `+ - * /`, or the expression of a plan step.
+impl<N, C: Context, E: Expr<N, C> + ?Sized> Expr<N, C> for Box<E> {
+    #[inline(always)]
+    fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
+        (**self).eval(ctx)
+    }
+
+    #[inline(always)]
+    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+        (**self).get_dependencies(deps);
+    }
+}
 
 pub trait AsExpression<N, C: Context> {
     type Target: Expr<N, C> + Send + Sync + 'static;
@@ -90,6 +114,7 @@ impl_as_expression_for_primitives!(
 mod tests {
     use super::*;
     use crate::nodes::{LiteralNode, Node};
+    use std::marker::PhantomData;
 
     pub struct Ctx;
 
@@ -120,5 +145,28 @@ mod tests {
 
         let c: LiteralNode<char> = AsExpression::<char, Ctx>::as_expr('x');
         assert_eq!(c.value, 'x');
+    }
+
+    #[test]
+    fn stored_expr_composes_into_a_tree() {
+        use crate::dep_probe::{Attack, Defense, ProbeCtx, attr, key, keys, set};
+
+        // A boxed expression as the payload of a node, then an operand of a
+        // binary node: exactly the composition the exported `StoredExpr` alias
+        // could not express before there was an `Expr` impl forwarding `Box`.
+        let boxed: StoredExpr<f32, ProbeCtx> = Box::new(attr::<Attack>().expr);
+        let boxed_node: Node<f32, ProbeCtx, _> = Node {
+            expr: boxed,
+            _marker: PhantomData,
+        };
+
+        let tree = boxed_node + attr::<Defense>();
+
+        assert_eq!(tree.eval(&()), 12.0, "the boxed operand still evaluates");
+        assert_eq!(
+            keys(&tree),
+            set([key::<Attack>(), key::<Defense>()]),
+            "get_dependencies forwards through the box"
+        );
     }
 }

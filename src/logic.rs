@@ -237,9 +237,16 @@ impl_neg_logical_method!(ExprLogicalNand, nand, LogicalNandNode, &&);
 impl_neg_logical_method!(ExprLogicalNor,  nor,  LogicalNorNode,  ||);
 impl_neg_logical_method!(ExprLogicalNxor, nxor, LogicalNxorNode,  ^);
 
+/// Conjoins every argument with [`and`](crate::logic::ExprLogicalAnd::and); the
+/// zero-argument form is the boolean constant `true`.
+///
+/// The caller needs the `and` trait in scope, and the expansion is a `Node` whose
+/// context type `C` comes from the arguments. With no arguments there is nothing
+/// to infer `C` from, so the empty form needs a type annotation or another
+/// constraint on `C`: `let c: Node<bool, MyCtx, _> = all![];`.
 #[macro_export]
 macro_rules! all {
-    () => {{ Node::lit(true) }};
+    () => {{ $crate::nodes::Node::lit(true) }};
     ($head:expr $(, $tail:expr)* $(,)?) => {{
         $head
         $(
@@ -248,9 +255,14 @@ macro_rules! all {
     }};
 }
 
+/// Disjoins every argument with [`or`](crate::logic::ExprLogicalOr::or); the
+/// zero-argument form is the boolean constant `false`.
+///
+/// Same shape as [`all!`], including the annotated-context requirement of the
+/// empty form.
 #[macro_export]
 macro_rules! any {
-    () => {{ Node::lit(false) }};
+    () => {{ $crate::nodes::Node::lit(false) }};
     ($head:expr $(, $tail:expr)* $(,)?) => {{
         $head
         $(
@@ -508,6 +520,32 @@ mod tests {
 
         let any_check = any![cond1, cond2, cond3];
         assert!(!any_check.eval(&&ctx_data));
+    }
+
+    #[test]
+    fn all_macro_with_no_arguments_is_true() {
+        let ctx_data = MockPlayerData {
+            damage: 50.0,
+            level: 10,
+            is_poisoned: true,
+        };
+
+        // The empty form carries no expression to infer the context type from,
+        // hence the annotation on C.
+        let empty_conjunction: Node<bool, MockEngine, _> = all![];
+        assert!(empty_conjunction.eval(&&ctx_data));
+    }
+
+    #[test]
+    fn any_macro_with_no_arguments_is_false() {
+        let ctx_data = MockPlayerData {
+            damage: 50.0,
+            level: 10,
+            is_poisoned: true,
+        };
+
+        let empty_disjunction: Node<bool, MockEngine, _> = any![];
+        assert!(!empty_disjunction.eval(&&ctx_data));
     }
 
     #[test]

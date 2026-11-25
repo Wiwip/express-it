@@ -66,7 +66,7 @@ fn main() {
         // Use Node::alias() to save any expression directly into cache
         .step(Node::lit(42).alias("reusable_literal"));
 
-    plan.run(&mut state);
+    plan.run(&mut state).expect("plan should run to completion");
 
     println!("Final State:   {:?}", state);
     assert_eq!(state.damage_dealt, 35);
@@ -84,7 +84,8 @@ fn main() {
     // Macro form
     let dmg_lookup = load_cache!(i32, "applied_damage");
     let dmg_val: Box<dyn Any> =
-        <_ as StepExecutor<CombatCtx>>::evaluate(&dmg_lookup, &state, &test_cache);
+        <_ as StepExecutor<CombatCtx>>::evaluate(&dmg_lookup, &state, &test_cache)
+            .expect("applied_damage is cached as an i32");
     assert_eq!(*dmg_val.downcast::<i32>().unwrap(), 73);
 
     // Explicit construction
@@ -93,7 +94,8 @@ fn main() {
         &lit_lookup,
         &state,
         &test_cache,
-    );
+    )
+    .expect("reusable_literal is cached as an i32");
     assert_eq!(*lit_val.downcast::<i32>().unwrap(), 77);
 
     println!("Cache save/load roundtrip verified!");

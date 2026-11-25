@@ -370,6 +370,25 @@ macro_rules! impl_trinary_method {
 
         pub trait $trait_name<A, B> {
             type Output;
+            /// Builds the node that evaluates `expr.method(arg1, arg2)`; nothing is
+            /// computed and nothing is checked at construction time.
+            ///
+            /// # Panics
+            ///
+            /// Evaluation panics under exactly the conditions the wrapped
+            /// standard-library method does. `clamp` is the only trinary method
+            /// generated here, and [`f32::clamp`]/[`f64::clamp`] panic in **both**
+            /// debug and release when `min > max`, or when either **bound** is NaN.
+            /// A NaN *value* between ordered bounds is not a panic: it comes back
+            /// as NaN. The panic message looks like
+            /// `min > max, or either was NaN. min = 10.0, max = 5.0`.
+            ///
+            /// Bounds may themselves be expressions, so this is reachable at run
+            /// time: keep `min <= max` and NaN-free for every evaluation of the tree.
+            ///
+            /// The panic in both profiles depends on num-traits being built with
+            /// its default `std` feature, which forwards `Float::clamp` to the
+            /// standard-library method; without it the release build only asserts.
             fn $method_name(self, arg1: A, arg2: B) -> Self::Output;
         }
 
@@ -571,11 +590,21 @@ mod tests {
         assert!(!f.or(f).eval(&()));
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
     fn test_int_overflow_panics_in_debug() {
         let a = Node::<i32, Ctx, _>::lit(i32::MAX);
         let _ = (a + 1).eval(&());
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn test_int_overflow_wraps_in_release() {
+        // Release drops the overflow check, so the same tree wraps instead of
+        // panicking. Pinned here to keep the profile difference explicit.
+        let a = Node::<i32, Ctx, _>::lit(i32::MAX);
+        assert_eq!((a + 1).eval(&()), i32::MIN);
     }
 
     #[test]
@@ -607,17 +636,48 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn test_cast_nan_to_int_panics() {
-        let _ = Node::<f32, Ctx, _>::lit(f32::NAN).cast::<i32>().eval(&());
+    fn test_cast_nan_to_int_is_zero() {
+        // `as` semantics: NaN converts to 0 instead of panicking.
+        assert_eq!(
+            Node::<f32, Ctx, _>::lit(f32::NAN).cast::<i32>().eval(&()),
+            0
+        );
     }
 
     #[test]
-    #[should_panic]
-    fn test_cast_inf_to_int_panics() {
-        let _ = Node::<f32, Ctx, _>::lit(f32::INFINITY)
-            .cast::<i32>()
-            .eval(&());
+    fn test_cast_inf_to_int_saturates() {
+        assert_eq!(
+            Node::<f32, Ctx, _>::lit(f32::INFINITY)
+                .cast::<i32>()
+                .eval(&()),
+            i32::MAX
+        );
+        assert_eq!(
+            Node::<f32, Ctx, _>::lit(f32::NEG_INFINITY)
+                .cast::<i32>()
+                .eval(&()),
+            i32::MIN
+        );
+    }
+
+    #[test]
+    fn test_cast_out_of_range_float_saturates() {
+        assert_eq!(
+            Node::<f32, Ctx, _>::lit(1e30).cast::<i32>().eval(&()),
+            i32::MAX
+        );
+        // Float-to-unsigned saturates at zero; it does not wrap like int-to-unsigned.
+        assert_eq!(Node::<f32, Ctx, _>::lit(-1.0).cast::<u32>().eval(&()), 0u32);
+    }
+
+    #[test]
+    fn test_cast_negative_int_to_unsigned_wraps_via_node_cast() {
+        // The same wrapping rule as the `nodes::tests` one, reached through the
+        // public `Node::cast` builder.
+        assert_eq!(
+            Node::<i32, Ctx, _>::lit(-1).cast::<u32>().eval(&()),
+            u32::MAX
+        );
     }
 
     #[test]
@@ -700,6 +760,30 @@ mod tests {
     fn test_clamp_rounds_up_at_ceiling() {
         let a = Node::<f32, Ctx, _>::lit(12.7);
         assert_eq!(a.clamp(5.0, 10.0).eval(&()), 10.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "min > max")]
+    fn test_clamp_reversed_bounds_panic_in_every_profile() {
+        // std's f32::clamp/f64::clamp panic on a reversed range in debug AND
+        // release, so this test needs no cfg gate.
+        let _ = Node::<f32, Ctx, _>::lit(7.0).clamp(10.0, 5.0).eval(&());
+    }
+
+    #[test]
+    #[should_panic(expected = "min > max")]
+    fn test_clamp_nan_bound_panics_in_every_profile() {
+        let _ = Node::<f32, Ctx, _>::lit(7.0).clamp(f32::NAN, 5.0).eval(&());
+    }
+
+    #[test]
+    fn test_clamp_nan_value_with_ordered_bounds_returns_nan() {
+        // Only a NaN *bound* panics. A NaN value inside an ordered range is passed
+        // through by std's clamp, in debug and release alike.
+        let f32_nan = Node::<f32, Ctx, _>::lit(f32::NAN).clamp(0.0, 1.0).eval(&());
+        assert!(f32_nan.is_nan());
+        let f64_nan = Node::<f64, Ctx, _>::lit(f64::NAN).clamp(0.0, 1.0).eval(&());
+        assert!(f64_nan.is_nan());
     }
 
     #[test]

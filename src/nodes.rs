@@ -1,6 +1,6 @@
 use crate::expr::{Context, Expr};
 use num_traits::Num;
-use std::any::TypeId;
+use std::any::{TypeId, type_name};
 use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
@@ -38,7 +38,19 @@ impl<N, C, E: Clone> Clone for Node<N, C, E> {
 impl<N, C, E: Copy> Copy for Node<N, C, E> {}
 
 impl<N: Num, C: Context, E: Expr<N, C>> Node<N, C, E> {
-    pub fn cast<To: Num>(self) -> Node<To, C, CastNode<N, To, C, E>> {
+    /// Reinterprets the node's value as `To` with Rust's `as` conversion rules.
+    ///
+    /// The conversion is total: it never panics and never returns `None`. It is
+    /// literally `value as To` (see [`AsCast`]), so NaN converts to `0`, floats
+    /// outside the target integer range saturate to that type's min/max, and
+    /// int-to-int casts wrap on two's complement (`-1i32` becomes `u32::MAX`).
+    ///
+    /// The `AsCast` bound covers the primitive numeric types, so a third-party
+    /// `Num` type needs its own `AsCast` impl to be castable.
+    pub fn cast<To: Num>(self) -> Node<To, C, CastNode<N, To, C, E>>
+    where
+        N: AsCast<To>,
+    {
         Node {
             expr: CastNode::new(self.expr),
             _marker: PhantomData,
@@ -70,11 +82,24 @@ impl<N: fmt::Display, C: Context, E: Expr<N, C> + fmt::Display> fmt::Display for
 
 /// Evaluates `expr` and stores the result in the PlanCache under `key`.
 /// Does NOT write to the context state — pure cache-only step.
-#[derive(Clone, Copy)]
 pub struct CacheSaveStep<N: 'static, C: Context, E> {
     pub key: &'static str,
     pub expr: Node<N, C, E>,
 }
+
+// Hand-written, like the `Node` impls: `C` is a marker parameter here, so a
+// derived impl would demand `C: Clone`/`C: Copy` and leave the plain unit-struct
+// contexts used across the examples unable to clone their own steps.
+impl<N: 'static, C: Context, E: Clone> Clone for CacheSaveStep<N, C, E> {
+    fn clone(&self) -> Self {
+        Self {
+            key: self.key,
+            expr: self.expr.clone(),
+        }
+    }
+}
+
+impl<N: 'static, C: Context, E: Copy> Copy for CacheSaveStep<N, C, E> {}
 
 pub type Var<N, C> = Node<N, C, VarExpr<N, C>>;
 
@@ -127,8 +152,10 @@ where
     From: fmt::Display,
     E: fmt::Display,
 {
+    // `type_name` needs no bound on `To` (it is `fn type_name<T: ?Sized>()`), so
+    // the target type is printed without widening this impl.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "cast({})", self.inner)
+        write!(f, "cast::<{}>({})", type_name::<To>(), self.inner)
     }
 }
 
@@ -150,6 +177,69 @@ impl<N: fmt::Display> fmt::Display for LiteralNode<N> {
     }
 }
 
+/// Numeric conversion that reproduces Rust's `as` operator for every primitive
+/// pair, so `Node::cast` can be total instead of panicking.
+///
+/// Each result is what `value as To` yields:
+///
+/// * float → float: only precision changes; NaN stays NaN, infinities stay infinite.
+/// * float → int: the fractional part is dropped toward zero, `NaN` becomes `0`,
+///   and values beyond the target range saturate to that type's min/max
+///   (`1e30f32 as i32 == i32::MAX`, `-1.0f32 as u32 == 0`).
+/// * int → int: in-range values are unchanged; otherwise the bits are truncated,
+///   i.e. two's-complement wrapping (`-1i32 as u32 == u32::MAX`,
+///   `i64::MAX as i8 == -1`).
+/// * int → float: rounded to the nearest representable value.
+///
+/// Implemented for the primitive numeric types only (`f32`, `f64`, the signed and
+/// unsigned integers): implement it yourself for your own `Num` type to cast to or
+/// from it.
+pub trait AsCast<To> {
+    /// Converts `self` to `To` with `as` semantics. Total: never panics.
+    ///
+    /// Takes `self` by value because that is what `as` does, and every implementor
+    /// is a `Copy` primitive, so there is nothing worth borrowing. Same reasoning
+    /// (and the same allow) as [`crate::expr::AsExpression::as_expr`].
+    #[allow(clippy::wrong_self_convention)]
+    fn as_cast(self) -> To;
+}
+
+macro_rules! impl_as_cast {
+    ($from:ty, [$($to:ty),+]) => {
+        $(
+            impl AsCast<$to> for $from {
+                #[inline(always)]
+                fn as_cast(self) -> $to {
+                    self as $to
+                }
+            }
+        )+
+    };
+}
+
+/// `as` is defined for every primitive pair, so the matrix covers every
+/// `Num`-compatible source/target combination the crate can build a cast for.
+macro_rules! impl_as_cast_matrix {
+    ($($from:ty),+ $(,)?) => {
+        $(
+            impl_as_cast!(
+                $from,
+                [f32, f64, i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize]
+            );
+        )+
+    };
+}
+
+impl_as_cast_matrix!(
+    f32, f64, // Floats
+    i8, i16, i32, i64, i128, isize, // Signed Ints
+    u8, u16, u32, u64, u128, usize // Unsigned Ints
+);
+
+/// Converts the inner expression's value from `From` to `To` at evaluation time.
+///
+/// The conversion is [`AsCast::as_cast`], i.e. Rust's `as` operator: total, never
+/// panicking, saturating for float→int (NaN becomes `0`), wrapping for int→int.
 pub struct CastNode<From: Num, To: Num, C: Context, E: Expr<From, C>> {
     inner: E,
     _marker: PhantomData<(From, To, C)>,
@@ -168,14 +258,13 @@ impl<From: Num, To: Num, C: Context, T: Expr<From, C> + Copy> Copy for CastNode<
 
 impl<From, To, C: Context, T> Expr<To, C> for CastNode<From, To, C, T>
 where
-    From: Num + num_traits::ToPrimitive + num_traits::NumCast,
-    To: Num + num_traits::NumCast,
+    From: Num + AsCast<To>,
+    To: Num,
     T: Expr<From, C>,
 {
     #[inline(always)]
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> To {
-        let val = self.inner.eval(ctx);
-        num_traits::cast(val).expect("Failed to cast numeric value")
+        self.inner.eval(ctx).as_cast()
     }
 
     fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
@@ -227,6 +316,30 @@ mod tests {
     }
 
     #[test]
+    fn cast_display_names_the_target_type() {
+        // `.cast::<i32>()` and `.cast::<u8>()` must not print the same string.
+        let as_i32 = Node::<f32, Ctx, _>::lit(3.7f32).cast::<i32>();
+        let as_u8 = Node::<f32, Ctx, _>::lit(3.7f32).cast::<u8>();
+
+        assert_eq!(as_i32.to_string(), "cast::<i32>(3.7)");
+        assert_eq!(as_u8.to_string(), "cast::<u8>(3.7)");
+    }
+
+    #[test]
+    fn cache_save_step_clones_without_a_clone_context() {
+        // `Ctx` is a plain unit struct: a derived impl would have demanded
+        // `C: Clone`, which it does not satisfy, so this would not compile.
+        // Generic so that clippy's `clone_on_copy` does not fire on a payload that
+        // happens to be `Copy`.
+        fn cloned<T: Clone>(value: T) -> T {
+            value.clone()
+        }
+
+        let step = Node::<i32, Ctx, _>::lit(7).alias("seven");
+        let _cloned = cloned(step);
+    }
+
+    #[test]
     fn test_literal_eval_via_expr_trait() {
         let lit = LiteralNode { value: 7i32 };
         assert_eq!(Expr::<i32, Ctx>::eval(&lit, &()), 7);
@@ -253,11 +366,19 @@ mod tests {
     }
 
     #[test]
-    fn test_cast_failure_panics() {
+    fn test_cast_out_of_range_int_wraps_like_as() {
+        // `i64::MAX as i8` keeps the low byte: -1. The cast is total, so the
+        // out-of-range value that used to panic now returns like `as` does.
         let inner = LiteralNode { value: i64::MAX };
         let node = CastNode::<i64, i8, Ctx, _>::new(inner);
-        let result = std::panic::catch_unwind(|| node.eval(&()));
-        assert!(result.is_err());
+        assert_eq!(node.eval(&()), -1i8);
+    }
+
+    #[test]
+    fn test_cast_negative_int_to_unsigned_wraps_like_as() {
+        let inner = LiteralNode { value: -1i32 };
+        let node = CastNode::<i32, u32, Ctx, _>::new(inner);
+        assert_eq!(node.eval(&()), u32::MAX);
     }
 
     #[test]

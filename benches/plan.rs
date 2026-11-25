@@ -85,7 +85,7 @@ fn bench_plan_run(c: &mut Criterion) {
         let mut state = START;
         b.iter(|| {
             state = START;
-            plan.run(&mut state);
+            plan.run(&mut state).expect("plan should run to completion");
             black_box(state.hp);
         });
     });

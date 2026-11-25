@@ -2,10 +2,38 @@
 name = "express-it"
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Typed expression-tree builder and sequential plan runner for game logic"
+repository = "https://github.com/Wiwip/express-it"
+readme = "README.md"
+keywords = ["expression", "tree", "plan", "ecs", "game"]
+categories = ["game-development", "rust-patterns"]
 
 [dependencies]
+# Keep the default features on: num-traits' `std` feature forwards `Float::clamp`
+# to std's inherent `f32::clamp`/`f64::clamp`, which is what makes the documented
+# clamp panic fire in release builds too (without it, release only asserts).
 num-traits = "0.2"
 
 [dev-dependencies]
-bevy = "0.20"
+# ECS only. `bevy` with default features pulls in the whole engine (wgpu, naga,
+# winit, cpal/alsa-sys, accesskit, ...), which would make `cargo test` build a
+# game engine just to compile the examples.
+bevy = { version = "0.20", default-features = false, features = ["std"] }
 criterion = "0.8"
+
+[[bench]]
+name = "bool"
+harness = false
+
+[[bench]]
+name = "float"
+harness = false
+
+[[bench]]
+name = "int"
+harness = false
+
+[[bench]]
+name = "plan"
+harness = false

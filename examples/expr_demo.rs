@@ -1,3 +1,4 @@
+use bevy::app::ScheduleRunnerPlugin;
 use bevy::ecs::world::EntityRefExcept;
 use bevy::prelude::*;
 use express_it::expr::{Context, Expr};
@@ -6,7 +7,10 @@ use express_it::ops::ExprClamp;
 
 fn main() {
     App::new()
-        .add_plugins(MinimalPlugins)
+        // A headless app needs an explicit schedule runner. `MinimalPlugins` installs one that
+        // loops forever, so drive the app with `run_once`: the `Main` schedule (and therefore
+        // `Startup` and `PostStartup`) runs a single time and `App::run` returns.
+        .add_plugins((TaskPoolPlugin::default(), ScheduleRunnerPlugin::run_once()))
         .add_systems(Startup, setup)
         .add_systems(PostStartup, post_setup)
         .run();

@@ -1,8 +1,61 @@
+#![doc = include_str!("../README.md")]
+
 pub mod expr;
 pub mod logic;
 pub mod nodes;
 pub mod ops;
 pub mod plan;
+
+/// Everything needed to build, compose, and run an expression, in one import.
+///
+/// The arithmetic operators (`+ - * / %`, unary `-` and `!`) are trait impls on
+/// `std::ops`, so they need no import at all. Everything else — `.max()`, `.lt()`,
+/// `.and()`, `.eval()` — is a method of a trait in this crate, and each one has to
+/// be in scope for its own method to resolve. The prelude carries all of them,
+/// plus the items a caller has to name rather than call: `StepExecutor` and the
+/// three step types for a custom step, `PlanCache` for its signatures, and
+/// `AsCast` for a generic cast bound.
+///
+/// Purely additive: every item stays at its original path, so `use
+/// express_it::ops::ExprMax;` and friends keep working.
+///
+/// ```
+/// use express_it::prelude::*;
+///
+/// struct Stats {
+///     hp: f32,
+/// }
+///
+/// struct GameCtx;
+///
+/// impl Context for GameCtx {
+///     type ContextItem<'w, 's> = Stats;
+/// }
+///
+/// let hp = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.hp);
+///
+/// // `.lt`, `.and`, `.max` and `eval` all come from the glob import above.
+/// let low = hp.lt(25.0).and(all![]);
+/// let floored = hp.max(25.0);
+///
+/// let wounded = Stats { hp: 10.0 };
+/// assert!(low.eval(&wounded));
+/// assert_eq!(floored.eval(&wounded), 25.0);
+/// ```
+pub mod prelude {
+    pub use crate::expr::{AsExpression, BoolExpr, Context, ContextMut, Expr, StoredExpr};
+    pub use crate::logic::{
+        ExprCmpEq, ExprCmpGe, ExprCmpGt, ExprCmpLe, ExprCmpLt, ExprCmpNotEq, ExprLogicNot,
+        ExprLogicalAnd, ExprLogicalNand, ExprLogicalNor, ExprLogicalNxor, ExprLogicalOr,
+        ExprLogicalXor,
+    };
+    pub use crate::nodes::{AsCast, CacheSaveStep, Node, Var, VarExpr};
+    pub use crate::ops::{ExprAbs, ExprAcos, ExprClamp, ExprMax, ExprMin, ExprPow, ExprSqrt};
+    pub use crate::plan::{
+        AssignmentStep, CacheLookupStep, Plan, PlanCache, PlanError, StepExecutor,
+    };
+    pub use crate::{all, any, load_cache, save, save_cache};
+}
 
 /// Test-only leaf with per-attribute identity, for the `get_dependencies` tests.
 ///
