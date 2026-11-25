@@ -188,8 +188,9 @@ pub type Var<N, C> = Node<N, C, VarExpr<N, C>>;
 ///   [`DepKey::Name`] and each attribute is its own key
 ///   with no leaf type written.
 ///
-/// The field is public because the struct is, and a `VarExpr` built by hand can
-/// set it; the two constructors cover what a caller normally wants.
+/// The fields are public because the struct is, and a `VarExpr` written by hand
+/// can set them; [`VarExpr::new`] and [`VarExpr::with_key`] cover what a caller
+/// normally wants.
 pub struct VarExpr<N, C: Context> {
     pub fetch_fn: for<'w, 's> fn(&C::ContextItem<'w, 's>) -> N,
     /// The variable's own name, or `None` to be keyed by this leaf's type.
@@ -198,6 +199,35 @@ pub struct VarExpr<N, C: Context> {
     /// [`Deps`] set, so one attribute has to be spelled one way
     /// everywhere.
     pub key: Option<&'static str>,
+}
+
+impl<N, C: Context> VarExpr<N, C> {
+    /// A variable keyed by this leaf's own type.
+    ///
+    /// This is what [`Node::new`] builds, and it means every unnamed variable of
+    /// one value type and one context reports a single dependency key. Reach for
+    /// [`VarExpr::with_key`] when two attributes have to be told apart.
+    pub fn new(fetch_fn: for<'w, 's> fn(&C::ContextItem<'w, 's>) -> N) -> Self {
+        Self {
+            fetch_fn,
+            key: None,
+        }
+    }
+
+    /// A variable keyed by `name`, so two attributes of one type are two keys.
+    ///
+    /// The same three limits as [`Node::var`] apply: `name` must be `'static`,
+    /// it is compared by exact string equality, and it is global to the crate
+    /// rather than scoped to this value type or context.
+    pub fn with_key(
+        name: &'static str,
+        fetch_fn: for<'w, 's> fn(&C::ContextItem<'w, 's>) -> N,
+    ) -> Self {
+        Self {
+            fetch_fn,
+            key: Some(name),
+        }
+    }
 }
 
 impl<N, C: Context> Clone for VarExpr<N, C> {
@@ -239,6 +269,19 @@ impl<N, C: Context> Node<N, C, VarExpr<N, C>> {
     /// variable and a [`var_leaf!`](crate::var_leaf) leaf sit in one `Deps` set
     /// side by side. The name is *not* used by `Display` — a tree of named variables
     /// still prints `var` for each of them.
+    ///
+    /// Three limits worth knowing before you pick names.
+    ///
+    /// * The name must be `'static`. A name that only exists at runtime — read
+    ///   from config, deserialised, or produced by formatting — cannot become a
+    ///   key; you can still *query* such a name against a set with
+    ///   `deps.iter().any(|k| k.as_name() == Some(runtime.as_str()))`, but you
+    ///   cannot insert one.
+    /// * A name key says nothing about the value type or the context: `var("hp", ..)`
+    ///   on an `f32` tree and on an `i64` tree of a different context produce the
+    ///   same key. Names are one flat namespace per crate.
+    /// * `""` is a legal name, and so every empty-named variable in the crate
+    ///   shares one key. Give variables real attribute names.
     ///
     /// ```
     /// use express_it::prelude::*;
@@ -403,15 +446,16 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 /// assert_eq!(Node::<f32, GameCtx, _>::from_expr(Shadow).eval(&stats), 6.0);
 /// ```
 ///
-/// This is where the call shape changed for 0.3. The macro used to emit
-/// `pub struct` whatever the call said, which handed every caller a public item —
-/// including the ones writing a private helper or an integration test. Nothing is
-/// inserted on your behalf now, and a 0.2 call still parses, because an empty
-/// visibility matches: `var_leaf!(Health, ..)` generates a *private* leaf where
-/// 0.2 generated a `pub` one. A 0.2 call that wanted a public leaf therefore has
-/// to gain the token — `var_leaf!(pub Health, f32, GameCtx, |ctx| ctx.hp)` — and
-/// nothing reports the omission until the first use from outside the leaf's own
-/// module, which reports `E0603` (*struct `Health` is private*).
+/// The visibility is written by the caller and nothing is inserted on their
+/// behalf: `var_leaf!(pub Health, ..)` generates a public leaf, `pub(crate)` a
+/// crate-private one, and a call with no token a leaf private to the module it
+/// sits in — which is what a private helper or an integration test wants. Using
+/// such a leaf from outside its own module fails with `E0603` (*struct `Health`
+/// is private*), exactly as for any other private item. Defaulting to private
+/// follows `bitflags!` and `thread_local!`, which behave the same way.
+///
+/// The macro is new in 0.3.0 and has never inserted a visibility of its own, so
+/// there is no earlier call shape to migrate from.
 ///
 /// # The generated fetch, and what it cannot reach
 ///
@@ -625,6 +669,11 @@ pub struct CastNode<From: Num, To: Num, C: Context, E: Expr<From, C>> {
 }
 
 impl<From: Num, To: Num, C: Context, T: Expr<From, C>> CastNode<From, To, C, T> {
+    /// Wraps `inner`, converting its value from `From` to `To` at evaluation
+    /// time through [`AsCast::as_cast`].
+    ///
+    /// `Node::cast` is the usual route; this is the same node for a caller
+    /// assembling a tree by hand.
     pub fn new(inner: T) -> Self {
         Self {
             inner,
@@ -821,6 +870,12 @@ mod tests {
         defense.get_dependencies(&mut deps);
 
         assert_eq!(deps.len(), 1, "both variables report the same VarExpr key");
+        // The count alone would also pass if the shared key became something
+        // else, so pin which key it is.
+        assert!(
+            deps.contains_type_of::<VarExpr<f32, Ctx>>(),
+            "and the one key is the VarExpr type, not something else"
+        );
     }
 
     #[test]

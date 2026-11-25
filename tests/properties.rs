@@ -143,10 +143,15 @@ fn states() -> impl Strategy<Value = State> {
 
 /// A finite `f64`.
 ///
-/// The filter is a precondition of several properties, not a hedge: `x - x` is NaN
-/// when `x` is, `clamp` panics on a NaN bound, and `a < b == !(a >= b)` is simply
-/// false for NaN. Filtering the *strategy* keeps the rejects local, so a deep run
-/// cannot exhaust the rejection budget the way `prop_assume!` would.
+/// A guard rather than a restriction: `any::<f64>()` in proptest 1.11 draws only
+/// zero, subnormal and normal values (`f64::Any(POSITIVE | NEGATIVE | ZERO |
+/// SUBNORMAL | NORMAL)`), so it never yields NaN or an infinity and this filter
+/// rejects nothing today. It is written because the properties genuinely do not
+/// hold for those values — `x - x` is NaN when `x` is, `clamp` panics on a NaN
+/// bound, and `a < b == !(a >= b)` is simply false for NaN — so if the upstream
+/// strategy ever widens, these properties stay honest instead of turning red for
+/// the wrong reason. Coverage of NaN and infinity flowing through a tree lives in
+/// the explicit specials below and in the unit tests in `src/ops.rs`.
 fn finite_f64() -> impl Strategy<Value = f64> {
     any::<f64>().prop_filter("finite", |value| value.is_finite())
 }
@@ -1010,12 +1015,14 @@ proptest! {
     }
 
     /// Property 5 — evaluating the same tree twice against the same context
-    /// yields the same value.
+    /// yields the same value, and the key walk repeats with it.
     ///
-    /// Catches an evaluation reading anything besides its context and its own
-    /// children (a static counter, a clock, a hash-ordered fold): `Expr::eval`
-    /// promises a pure function, and a plan that evaluates one expression twice
-    /// would otherwise get two answers out of it.
+    /// The value-repeat assertions are smoke tests rather than properties:
+    /// `Expr::eval` takes nothing but its context, and `src/` holds no interior
+    /// mutability, static, or clock for a value to come from, so they can only
+    /// fail if one of those stops being true. The dependency assertion at the end
+    /// is the one that can bite, and it is checked against every subtree below
+    /// the boolean tree, not just its left operand.
     #[test]
     fn evaluation_is_deterministic_for_a_fixed_context(
         lhs_leaves in leaves(),
@@ -1046,6 +1053,18 @@ proptest! {
                 .dependencies()
                 .is_superset_of(&build_f64(&lhs_leaves, false).dependencies()),
             "the boolean tree still reports the keys below it"
+        );
+        prop_assert!(
+            condition
+                .dependencies()
+                .is_superset_of(&build_f64(&rhs_leaves, false).dependencies()),
+            "including the operand on the right of the comparison"
+        );
+        prop_assert!(
+            condition
+                .dependencies()
+                .is_superset_of(&probe_flag().dependencies()),
+            "and the leaf folded in with `and`"
         );
     }
 
@@ -1318,9 +1337,19 @@ proptest! {
         prop_assert!(keyed.dependencies().contains_name("hp"), "and the cast forwards the key");
 
         // The documented specials, so a change of rule cannot slip past the pairs.
+        // Each float source gets its own, because saturation and the NaN rule are
+        // per-pair conversions: `as` is written once per target type.
         prop_assert_eq!(Node::<f64, Ctx, _>::lit(f64::NAN).cast::<i32>().eval(&state), 0, "NaN becomes 0");
         prop_assert_eq!(Node::<f64, Ctx, _>::lit(f64::INFINITY).cast::<i32>().eval(&state), i32::MAX);
         prop_assert_eq!(Node::<f64, Ctx, _>::lit(f64::NEG_INFINITY).cast::<i32>().eval(&state), i32::MIN);
+        prop_assert_eq!(Node::<f32, Ctx, _>::lit(f32::NAN).cast::<i32>().eval(&state), 0, "NaN becomes 0 from f32 too");
+        prop_assert_eq!(Node::<f32, Ctx, _>::lit(f32::INFINITY).cast::<i32>().eval(&state), i32::MAX);
+        prop_assert_eq!(Node::<f32, Ctx, _>::lit(f32::NEG_INFINITY).cast::<i32>().eval(&state), i32::MIN);
+        prop_assert_eq!(Node::<f64, Ctx, _>::lit(f64::NAN).cast::<u8>().eval(&state), 0);
+        prop_assert_eq!(Node::<f64, Ctx, _>::lit(f64::INFINITY).cast::<u8>().eval(&state), u8::MAX);
+        prop_assert_eq!(Node::<f64, Ctx, _>::lit(f64::NEG_INFINITY).cast::<u8>().eval(&state), 0, "negative infinity saturates to the unsigned minimum");
+        prop_assert_eq!(Node::<f32, Ctx, _>::lit(f32::NAN).cast::<u64>().eval(&state), 0);
+        prop_assert_eq!(Node::<f32, Ctx, _>::lit(f32::INFINITY).cast::<u64>().eval(&state), u64::MAX);
     }
 
     /// Property 11 — a plan applies every step, or stops at the failure.
@@ -1516,3 +1545,31 @@ fn set_side(state: &mut PlanState, value: i32) {
 /// One setter per field, all of one `fn` type, so a generated index picks the
 /// field at run time and one plan can hold a generated number of steps.
 const SETTERS: [fn(&mut PlanState, i32); 5] = [set_a, set_b, set_hp, set_note, set_side];
+
+/// `Node::var("")` is legal, and every empty-named variable in the crate shares
+/// that single key — documented on `Node::var` and on `DepKey`, and pinned here
+/// so it cannot change without someone noticing.
+#[test]
+fn an_empty_name_is_a_legal_key_shared_by_every_empty_named_variable() {
+    let first = Node::<f64, Ctx, _>::var("", read_hp);
+    let second = Node::<f64, Ctx, _>::var("", read_hp);
+    let deps = (first + second).dependencies();
+    assert_eq!(deps.len(), 1, "two empty-named variables are one key");
+    assert!(deps.contains_name(""), "the empty string is a legal key");
+
+    let named = Node::<f64, Ctx, _>::var("hp", read_hp).dependencies();
+    assert!(named.contains_name("hp"));
+    assert!(!named.contains_name(""), "and it is not the empty key");
+}
+
+/// The `&'static str` on name keys stops a runtime string becoming a key, but a
+/// runtime string can still be tested against a set, which is the escape hatch
+/// the `Deps::contains_name` doc promises.
+#[test]
+fn a_runtime_string_can_be_queried_against_a_name_key() {
+    let deps = Node::<f64, Ctx, _>::var("hp", read_hp).dependencies();
+    let hit = String::from("hp");
+    let miss = String::from("attack");
+    assert!(deps.iter().any(|k| k.as_name() == Some(hit.as_str())));
+    assert!(!deps.iter().any(|k| k.as_name() == Some(miss.as_str())));
+}

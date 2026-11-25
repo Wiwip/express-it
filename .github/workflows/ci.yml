@@ -35,25 +35,17 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   test:
-    name: Test (${{ matrix.os }}, ${{ matrix.toolchain }})
+    name: Test (${{ matrix.os }})
     needs: style
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        toolchain: [stable]
-        include:
-          # The crate claims `rust-version = "1.85"` (the edition-2024 floor), so
-          # exactly that toolchain has to build and pass, not just current stable.
-          - os: ubuntu-latest
-            toolchain: "1.85.0"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.toolchain }}
+      - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
@@ -70,7 +62,7 @@ jobs:
       # the default 300: an arithmetic or dependency-propagation bug that needs a
       # particular bit pattern is unlikely to show at 300 cases.
       - name: Deeper property sweep
-        if: matrix.os == 'ubuntu-latest' && matrix.toolchain == 'stable'
+        if: matrix.os == 'ubuntu-latest'
         env:
           PROPTEST_CASES: "2000"
         run: cargo test --release --test properties
@@ -79,6 +71,29 @@ jobs:
       # a bench that drifted from the library without spending a benchmark run.
       - name: Benches compile
         run: cargo bench --no-run
+
+  msrv:
+    name: MSRV (library only, 1.85.0)
+    needs: style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.85.0"
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `rust-version` is a promise about a *consumer*'s toolchain, and a consumer
+      # resolves only `num-traits`. The dev targets are not part of that promise
+      # and cannot be built here at all: `criterion` declares 1.86 and `bevy`
+      # declares 1.97.1, and cargo hard-errors on a dependency whose `rust-version`
+      # exceeds the active toolchain. So this job checks `--lib` and nothing else;
+      # anything that also compiles tests, examples or benches would be red for a
+      # reason unrelated to whether the library supports 1.85.
+      - name: Library checks out on the advertised rust-version
+        run: cargo check --locked --lib --all-features
 
   docs:
     name: Documentation
@@ -108,10 +123,24 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Verify the crate builds as a package and licence files ship
+      # Cargo only *warns* about a manifest with no `license` and still exits 0,
+      # verified with `cargo package` on a copy with the field deleted, so the
+      # metadata and the licence texts are asserted here rather than trusted to
+      # the dry run below.
+      - name: Licence metadata and texts ship
+        run: |
+          grep -q '^license = "MIT OR Apache-2.0"' Cargo.toml
+          test -f LICENSE-MIT
+          test -f LICENSE-APACHE
+          cargo package --list | grep -qx 'LICENSE-MIT'
+          cargo package --list | grep -qx 'LICENSE-APACHE'
+
+      - name: List the packaged file set
         run: cargo package --list
 
-      # Publishability without uploading: this is the check that a missing
-      # `license` field, a broken `readme` path or a stray `include` list fails.
+      # Publishability without uploading: builds the packed tree the way a
+      # consumer would get it. It needs the registry index, so it cannot run
+      # offline. It does not gate missing metadata — cargo warns about that and
+      # succeeds — which is what the step above is for.
       - name: Publish dry run
         run: cargo publish --dry-run

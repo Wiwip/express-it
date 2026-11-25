@@ -13,8 +13,9 @@ pub mod plan;
 /// `.and()`, `.eval()` — is a method of a trait in this crate, and each one has to
 /// be in scope for its own method to resolve. The prelude carries all of them,
 /// plus the items a caller has to name rather than call: `StepExecutor` and the
-/// three step types for a custom step, `PlanCache` for its signatures, and
-/// `AsCast` for a generic cast bound. It also re-exports all six exported macros —
+/// three step types for a custom step, `PlanCache` for its signatures,
+/// `AsCast` for a generic cast bound, and `Deps` with `DepKey` for a leaf of your
+/// own that reports dependencies. It also re-exports all six exported macros —
 /// `all!`, `any!`, `save!`, `save_cache!`, `load_cache!`, and `var_leaf!` — so the
 /// one glob carries the macros along with the traits.
 ///
@@ -45,7 +46,9 @@ pub mod plan;
 /// assert_eq!(floored.eval(&wounded), 25.0);
 /// ```
 pub mod prelude {
-    pub use crate::expr::{AsExpression, BoolExpr, Context, ContextMut, Expr, StoredExpr};
+    pub use crate::expr::{
+        AsExpression, BoolExpr, Context, ContextMut, DepKey, Deps, Expr, StoredExpr,
+    };
     pub use crate::logic::{
         ExprCmpEq, ExprCmpGe, ExprCmpGt, ExprCmpLe, ExprCmpLt, ExprCmpNotEq, ExprLogicNot,
         ExprLogicalAnd, ExprLogicalNand, ExprLogicalNor, ExprLogicalNxor, ExprLogicalOr,

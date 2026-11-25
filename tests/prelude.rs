@@ -411,3 +411,35 @@ fn the_prelude_macro_honours_pub_and_pub_crate_from_outside_the_module() {
     assert_eq!(shield.to_string(), "ShieldLeaf");
     assert_eq!(regen.to_string(), "RegenLeaf");
 }
+
+/// `Deps` and `DepKey` are in the prelude, because implementing a leaf names
+/// both in the signature of `get_dependencies`: a caller who imports the prelude
+/// and nothing else has to be able to write that impl.
+#[test]
+fn prelude_names_the_dependency_sink_types() {
+    fn sink<E: Expr<f32, Ctx>>(node: &Node<f32, Ctx, E>) -> Deps {
+        let mut deps = Deps::new();
+        node.get_dependencies(&mut deps);
+        deps.insert(DepKey::name("extra"));
+        deps
+    }
+
+    let literal = Node::<f32, Ctx, _>::lit(1.0);
+    let deps = sink(&literal);
+    assert!(
+        deps.contains_name("extra"),
+        "a key built through the prelude"
+    );
+    assert_eq!(deps.len(), 1, "and a literal contributed nothing beside it");
+
+    // The two leaf constructors, named through the same glob.
+    let unnamed: VarExpr<f32, Ctx> = VarExpr::new(|_c: &State| 1.0f32);
+    let named: VarExpr<f32, Ctx> = VarExpr::with_key("hp", |_c: &State| 2.0f32);
+    assert!(unnamed.key.is_none(), "keyed by its type");
+    assert_eq!(named.key, Some("hp"), "keyed by its name");
+    assert_eq!(
+        Node::from_expr(named).dependencies().len(),
+        1,
+        "and the leaf the constructor built reports that one key"
+    );
+}

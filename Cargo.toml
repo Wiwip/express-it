@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.85"
 description = "Typed expression-tree builder and sequential plan runner for game logic"
 license = "MIT OR Apache-2.0"
+# Dev-tooling scratch state: tracked in the repository for convenience, but it
+# is not part of the crate a user downloads.
+exclude = [".agent-sandbox"]
 repository = "https://github.com/Wiwip/express-it"
 readme = "README.md"
 keywords = ["expression", "tree", "plan", "ecs", "game"]

@@ -50,9 +50,13 @@ macro_rules! impl_cmp_method {
         }
 
         impl<N, L, R> $node_name<N, L, R> {
-            // The constructor is the only way to name the marker: `N` cannot be
-            // read off the operands, it is settled by the `Expr<N, C>` impls the
-            // two of them happen to satisfy.
+            /// Compares `lhs` with `rhs`, the node the comparison methods build.
+            ///
+            /// `N`, the operands' shared value type, appears only in the marker:
+            /// it is settled by the `Expr<N, C>` impls the two operands happen to
+            /// satisfy, so a bare call cannot infer it. Either let a combinator
+            /// method settle it (`a.lt(b)`) or write it out,
+            /// `LessThanNode::<f32, _, _>::new(a, b)`.
             pub fn new(lhs: L, rhs: R) -> Self {
                 Self {
                     lhs,

@@ -29,6 +29,16 @@ pub trait ContextMut: Context {
 /// neither is reachable from the other: the first gives a leaf its identity from
 /// its type, the second from a name.
 ///
+/// Two things that are not two methods, but bite anyway. Composing a node with
+/// another needs `Copy` — the combinator methods require `Self: Copy` and
+/// [`AsExpression`] asks for `Clone + Send + Sync + 'static` — so a stateful leaf
+/// that cannot be `Copy` has to be held behind [`Box`], which is `Copy` by
+/// cloning the handle. And `get_dependencies` has a **default body that adds
+/// nothing**: correct for a literal, silently wrong for a composite, which then
+/// reports a strict *subset* of what it reads. That is the one direction the
+/// may-read contract below does not cover, and a watcher built from such a node
+/// is never told the tree is stale.
+///
 /// ```
 /// use express_it::expr::{DepKey, Deps};
 /// use express_it::prelude::*;
@@ -79,15 +89,21 @@ pub trait Expr<N, C: Context> {
     /// while `eval` may skip some of them. `&&` and `||` are the case that
     /// matters — `a && b` reports both operands even though a live `eval`
     /// short-circuits and never reads `b` once `a` is false. Arithmetic is exact
-    /// by contrast, since every arithmetic node (`+ - * / %`, `powf`, `min`,
-    /// `max`, `abs`, `sqrt`, `clamp(..)`, casts) evaluates all of its children.
+    /// about which *leaves the walk reaches*, by contrast: every arithmetic node
+    /// (`+ - * / %`, `powf`, `min`, `max`, `abs`, `sqrt`, `clamp(..)`, casts)
+    /// evaluates all of its children. It is not exact about which *attributes*
+    /// exist, because two variables built through
+    /// [`Node::new`](crate::nodes::Node::new) of one value type report one shared
+    /// key, so a set can name fewer attributes than the tree really reads.
     /// Watching a leaf that a particular evaluation skipped only costs a
     /// redundant re-evaluation, so the superset is a documented property rather
     /// than a defect, and callers get a conservative answer they can register
     /// edges from ahead of the first evaluation.
     ///
     /// Leaf identity is up to the leaf: the default implementation contributes
-    /// nothing, which is correct for nodes that hold no variables (a literal).
+    /// nothing, which is correct for nodes that hold no variables (a literal)
+    /// and silently wrong for a composite that forwards to nothing, which reports
+    /// fewer keys than it reads.
     /// Order is unspecified — the sink is a hash set of [`DepKey`]s, so a caller
     /// that depends on a particular order must sort the collected keys.
     ///
@@ -114,6 +130,12 @@ pub trait Expr<N, C: Context> {
 /// parses a name, so one attribute spelled two ways is two keys to a dependency
 /// layer. A `Name` and a `Type` never collide either — they are different variants,
 /// so a name and a leaf type share nothing.
+///
+/// A name is not scoped to a value type or a context: `"hp"` on an `f32` tree and
+/// `"hp"` on an `i64` tree of some other context are the same key, because a name
+/// key carries nothing but its string. One spelling therefore means one attribute
+/// across the whole crate — and `""`, being a legal string, is a legal key that
+/// every empty-named variable shares.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum DepKey {
     /// Identity of a leaf type: what `var_leaf!` and hand-written leaves report.
@@ -135,7 +157,9 @@ impl DepKey {
     /// The key of the variable named `key`: the `Name` variant.
     ///
     /// Exact string equality decides whether two of these are the same key, so
-    /// spell one attribute one way everywhere.
+    /// spell one attribute one way everywhere. The name has to be `'static`, so a
+    /// name produced at runtime cannot be inserted as a key; and `""` is a legal
+    /// name, shared by every empty-named key.
     #[inline(always)]
     pub fn name(key: &'static str) -> Self {
         DepKey::Name(key)
@@ -186,8 +210,9 @@ impl fmt::Display for DepKey {
 /// a hash set. `Deps` is `PartialEq` (two sinks holding the same keys are equal,
 /// whatever order they went in) but is *not* `Ord` or `PartialOrd`: an ordering
 /// would claim a sequence the hash set does not have. A caller that wants keys in
-/// a stable order has to sort them itself — collect the strings from
-/// `DepKey::to_string`, or the `Option<&str>` from `as_name`, and sort those.
+/// a stable order has to sort them itself — collect `DepKey::to_string` for each
+/// key and sort those. Sorting the `Option<&str>` from [`DepKey::as_name`] orders
+/// only the name keys, since every type key maps to `None`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Deps {
     keys: HashSet<DepKey>,
@@ -225,6 +250,10 @@ impl Deps {
 
     /// Whether the type key of `T` is in the set — the check for a leaf keyed by
     /// its type (`var_leaf!`, a hand-written leaf, a [`Node::new`] variable).
+    ///
+    /// A leaf reports whatever key it chooses, which for a generic leaf is often
+    /// its type parameter rather than itself: `Probe<Attack>` reports `Attack`, so
+    /// this answers for `Attack` and not for `Probe<Attack>`.
     #[inline(always)]
     pub fn contains_type_of<T: 'static>(&self) -> bool {
         self.keys.contains(&DepKey::type_of::<T>())
@@ -232,6 +261,11 @@ impl Deps {
 
     /// Whether the name key `name` is in the set — the check for a
     /// [`Node::var`] variable. Exact string equality, as on [`DepKey::name`].
+    ///
+    /// The `&'static str` follows from the key itself borrowing a `&'static str`.
+    /// A name that only exists at runtime cannot become a key, but it can still
+    /// be tested against a set:
+    /// `deps.iter().any(|k| k.as_name() == Some(runtime.as_str()))`.
     #[inline(always)]
     pub fn contains_name(&self, name: &'static str) -> bool {
         self.keys.contains(&DepKey::name(name))
@@ -258,9 +292,11 @@ impl Deps {
     /// Whether every key of `other` is also in `self`.
     ///
     /// The containment test a dependency layer wants: a composite's keys are a
-    /// superset of each operand's, so "does this tree read what that tree reads?"
-    /// is one call. The empty set is a subset of everything, so `is_superset_of`
-    /// against an empty `other` is always true.
+    /// superset of each operand's, so "does this tree read at least what that
+    /// tree reads?" is one call. The empty set is a subset of everything, so
+    /// `is_superset_of` against an empty `other` is always true — and because
+    /// unnamed `Node::new` variables share one key, a true answer can still be
+    /// resting on a key that stands for two attributes.
     #[inline(always)]
     pub fn is_superset_of(&self, other: &Deps) -> bool {
         self.keys.is_superset(&other.keys)

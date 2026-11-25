@@ -287,7 +287,8 @@ zero-sized `Expr` implementor whose `get_dependencies` inserts
 `Node::from_expr` makes a node out of it. The name is written with the visibility
 the leaf should have (`pub` here, `pub(crate)`, `pub(super)`, or nothing for a leaf
 private to its module); the macro inserts no visibility of its own, so a call that
-names none now generates a private leaf where 0.2 generated a `pub` one. The last
+names none generates a leaf private to the module it sits in, and reaching it from
+anywhere else fails with `E0603` as it would for any private item. The last
 argument is the fetch, `|ctx| ..`, with `ctx` bound to a reference to your context
 item:
 
@@ -345,11 +346,17 @@ current API and does not carry release notes.
 
 ## Examples and benches
 
+`rust-version = "1.85"` in `Cargo.toml` is what a *consumer* needs: the library's
+only dependency is `num-traits`, and dev-dependencies never enter a downstream
+build. Building these development targets needs more, because `criterion` declares
+1.86 and `bevy` declares 1.97.1 — `cargo build --lib` works on 1.85, while
+`cargo test` on a clone wants a current stable toolchain. CI splits the same way:
+a library-only check on 1.85, the full suite on stable.
+
 The examples in `examples/` and the criterion suites in `benches/` are development
 targets of this crate: they belong to a clone of the repository, not to depending
 on the crate, because they need its dev-dependencies (`bevy`, `criterion`). From a
 clone of the repository:
-
 ```sh
 cargo run --example expr_demo   # bevy-backed variables
 cargo run --example conditions
