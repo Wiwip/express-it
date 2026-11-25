@@ -8,7 +8,6 @@
 
 use express_it::prelude::*;
 use std::any::Any;
-use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug)]
 struct State {
@@ -74,38 +73,63 @@ fn prelude_alone_builds_a_leaf_with_a_dependency_key_of_its_own() {
 
     // The contrast the macro exists for: these two attributes are two keys, while
     // the `Node::new` helpers above (`hp()`, `def()`) report one key between them.
-    let mut leaf_keys = HashSet::new();
-    hp_leaf.get_dependencies(&mut leaf_keys);
-    def_leaf.get_dependencies(&mut leaf_keys);
-    assert_eq!(leaf_keys.len(), 2, "one key per attribute leaf");
+    let hp_keys = hp_leaf.dependencies();
+    let def_keys = def_leaf.dependencies();
+    assert_eq!(hp_keys.len(), 1, "one key per attribute leaf");
+    assert_ne!(hp_keys, def_keys);
 
-    let mut var_keys = HashSet::new();
-    hp().get_dependencies(&mut var_keys);
-    def().get_dependencies(&mut var_keys);
+    let mut leaf_keys = hp_leaf.dependencies();
+    leaf_keys.union_with(&def_leaf.dependencies());
+    assert_eq!(leaf_keys.len(), 2, "and two leaves together are two keys");
+
+    let mut var_keys = hp().dependencies();
+    var_keys.union_with(&def().dependencies());
     assert_eq!(var_keys.len(), 1, "and the shared VarExpr key unchanged");
 
     // The payoff the commit message promises, asserted on a composite built from
     // two macro leaves rather than on two merged single-leaf sets: the tree itself
     // reports two keys — through an arithmetic node, and through the comparison and
     // logic nodes too.
-    let mut sum_keys = HashSet::new();
-    (hp_leaf + def_leaf).get_dependencies(&mut sum_keys);
+    let sum_keys = (hp_leaf + def_leaf).dependencies();
     assert_eq!(
         sum_keys.len(),
         2,
         "a composite of two var_leaf! attributes reports two dependency keys"
     );
+    assert!(sum_keys.is_superset_of(&hp_keys));
+    assert!(sum_keys.is_superset_of(&def_keys));
 
-    let mut condition_keys = HashSet::new();
-    hp_leaf
-        .lt(5.0)
-        .and(def_leaf.gt(1.0))
-        .get_dependencies(&mut condition_keys);
+    let condition_keys = hp_leaf.lt(5.0).and(def_leaf.gt(1.0)).dependencies();
     assert_eq!(
         condition_keys.len(),
         2,
         "a boolean composite of the same two leaves reports those same two keys"
     );
+}
+
+#[test]
+fn prelude_alone_gives_two_variables_of_one_value_type_two_keys() {
+    // The headline of the release, from outside the crate and from one glob
+    // import: `Node::var` separates two `f32` attributes of one context by name,
+    // which `hp()` and `def()` above cannot do.
+    let hp = Node::<f32, Ctx, _>::var("hp", |state: &State| state.hp);
+    let def = Node::<f32, Ctx, _>::var("def", |state: &State| state.def);
+
+    let deps = (hp + def).dependencies();
+    assert_eq!(deps.len(), 2, "one key per name");
+    assert!(deps.contains_name("hp"));
+    assert!(deps.contains_name("def"));
+    assert!(!deps.contains_name("atk"), "and a name it never reads");
+    assert_eq!((hp + def).eval(&start()), 15.0, "evaluation is unchanged");
+
+    // The two keying schemes coexist: the named variable contributes a name key,
+    // the generated leaf a type key, and neither is found under the other's check.
+    let mixed = (hp + Node::<f32, Ctx, _>::from_expr(HpLeaf)).dependencies();
+    assert_eq!(mixed.len(), 2);
+    assert!(mixed.contains_name("hp"));
+    assert!(mixed.contains_type_of::<HpLeaf>());
+    assert!(!mixed.contains_name("HpLeaf"));
+    assert!(!mixed.contains_type_of::<VarExpr<f32, Ctx>>());
 }
 
 #[test]
@@ -310,6 +334,11 @@ fn existing_full_paths_still_resolve_and_name_the_same_items() {
     let _bool_expr: Option<express_it::expr::BoolExpr<Ctx>> = None;
     let _alias: Option<express_it::nodes::Var<f32, Ctx>> = None;
     let _lookup: express_it::plan::CacheLookupStep<f32> = load_cache!(f32, "k");
+
+    // The dependency types by their full path: `Node::dependencies` hands back a
+    // `Deps`, and a caller that names one writes this path.
+    let _deps: Option<express_it::expr::Deps> = None;
+    let _key: express_it::expr::DepKey = express_it::expr::DepKey::name("hp");
 
     // Item 7 from the outside: plan steps clone even though `Ctx` is a plain unit
     // struct that is neither Clone nor Copy. The helper is generic so clippy's

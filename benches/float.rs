@@ -1,11 +1,9 @@
 //! Float evaluation: literals, variables, unary and binary nodes, a plain Rust
 //! addition as the floor they are measured against, and the dependency walk.
 use criterion::{Criterion, criterion_group, criterion_main};
-use express_it::expr::{Context, Expr};
+use express_it::expr::{Context, DepKey, Deps, Expr};
 use express_it::nodes::{Node, VarExpr};
 use express_it::ops::{ExprAbs, ExprSqrt};
-use std::any::TypeId;
-use std::collections::HashSet;
 use std::hint::black_box;
 use std::marker::PhantomData;
 
@@ -99,8 +97,8 @@ impl<K: 'static, C: Context> Expr<f32, C> for Leaf<K> {
         1.0
     }
 
-    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
-        deps.insert(TypeId::of::<K>());
+    fn get_dependencies(&self, deps: &mut Deps) {
+        deps.insert(DepKey::type_of::<K>());
     }
 }
 
@@ -118,13 +116,13 @@ fn bench_dependency_walk(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_dependencies");
     group.bench_function("three_leaves", |b| {
         b.iter(|| {
-            let mut deps = HashSet::new();
+            let mut deps = Deps::new();
             expr.get_dependencies(&mut deps);
             black_box(deps.len());
         });
     });
     group.bench_function("empty_sink_reuse", |b| {
-        let mut deps = HashSet::new();
+        let mut deps = Deps::new();
         b.iter(|| {
             deps.clear();
             expr.get_dependencies(&mut deps);

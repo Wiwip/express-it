@@ -59,19 +59,17 @@ pub mod prelude {
     pub use crate::{all, any, load_cache, save, save_cache, var_leaf};
 }
 
-/// Test-only leaf with per-attribute identity, for the `get_dependencies` tests.
+/// Test-only leaves and key helpers, for the `get_dependencies` tests.
 ///
-/// A variable built through `Node::new` reports the key of `VarExpr<N, C>`, so
-/// every variable of one value type and context shares a single key and cannot
-/// be told apart. A consumer that needs per-attribute identity supplies its own
-/// leaf as the `E` parameter of `Node` through `Node::from_expr`, so the
-/// forwarding tests do the same.
+/// Two ways to get per-attribute identity, and the one that does not: a leaf with
+/// its own type (`Probe<A>`, keyed by `DepKey::type_of::<A>()`), a named variable
+/// through `Node::var` (keyed by `DepKey::name`), and a `Node::new` variable,
+/// which reports the key of `VarExpr<N, C>` so every variable of one value type
+/// and context shares a single key — the tests in `nodes.rs` pin that.
 #[cfg(test)]
 pub(crate) mod dep_probe {
-    use crate::expr::{Context, Expr};
+    use crate::expr::{Context, DepKey, Deps, Expr};
     use crate::nodes::Node;
-    use std::any::TypeId;
-    use std::collections::HashSet;
     use std::marker::PhantomData;
 
     pub struct ProbeCtx;
@@ -118,8 +116,8 @@ pub(crate) mod dep_probe {
             A::VALUE
         }
 
-        fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
-            deps.insert(TypeId::of::<A>());
+        fn get_dependencies(&self, deps: &mut Deps) {
+            deps.insert(DepKey::type_of::<A>());
         }
     }
 
@@ -127,17 +125,19 @@ pub(crate) mod dep_probe {
         Node::from_expr(Probe(PhantomData))
     }
 
-    pub fn key<A: 'static>() -> TypeId {
-        TypeId::of::<A>()
+    /// The key a `Probe<A>` leaf reports — the type-derived one.
+    pub fn key<A: 'static>() -> DepKey {
+        DepKey::type_of::<A>()
     }
 
-    pub fn set(keys: impl IntoIterator<Item = TypeId>) -> HashSet<TypeId> {
+    /// Builds a key set, to compare against the keys a whole tree reports.
+    pub fn set(keys: impl IntoIterator<Item = DepKey>) -> Deps {
         keys.into_iter().collect()
     }
 
     /// The keys `expr` reports, walked from this node down.
-    pub fn keys<N, E: Expr<N, ProbeCtx>>(expr: &E) -> HashSet<TypeId> {
-        let mut deps = HashSet::new();
+    pub fn keys<N, E: Expr<N, ProbeCtx>>(expr: &E) -> Deps {
+        let mut deps = Deps::new();
         expr.get_dependencies(&mut deps);
         deps
     }

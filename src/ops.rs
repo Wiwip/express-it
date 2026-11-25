@@ -1,9 +1,7 @@
-use crate::expr::{Context, Expr};
+use crate::expr::{Context, Deps, Expr};
 use crate::nodes::LiteralNode;
 use crate::nodes::Node;
 use num_traits::{Float, Num};
-use std::any::TypeId;
-use std::collections::HashSet;
 use std::fmt;
 
 macro_rules! impl_binary_op {
@@ -24,7 +22,7 @@ macro_rules! impl_binary_op {
                 self.lhs.eval(ctx) $op self.rhs.eval(ctx)
             }
 
-            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+            fn get_dependencies(&self, deps: &mut Deps) {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
@@ -134,7 +132,7 @@ macro_rules! impl_unary_op {
                 $op self.expr.eval(ctx)
             }
 
-            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+            fn get_dependencies(&self, deps: &mut Deps) {
                 self.expr.get_dependencies(deps);
             }
         }
@@ -184,7 +182,7 @@ macro_rules! impl_binary_method {
                 self.lhs.eval(ctx).$method_name(self.rhs.eval(ctx))
             }
 
-            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+            fn get_dependencies(&self, deps: &mut Deps) {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
@@ -265,7 +263,7 @@ macro_rules! impl_unary_method {
                 self.expr.eval(ctx).$method_name()
             }
 
-            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+            fn get_dependencies(&self, deps: &mut Deps) {
                 self.expr.get_dependencies(deps);
             }
         }
@@ -324,7 +322,7 @@ macro_rules! impl_trinary_method {
                     .$method_name(self.arg1.eval(ctx), self.arg2.eval(ctx))
             }
 
-            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+            fn get_dependencies(&self, deps: &mut Deps) {
                 self.expr.get_dependencies(deps);
                 self.arg1.get_dependencies(deps);
                 self.arg2.get_dependencies(deps);

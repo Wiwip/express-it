@@ -1,7 +1,6 @@
-use crate::expr::{Context, Expr};
+use crate::expr::{Context, DepKey, Deps, Expr};
 use num_traits::Num;
-use std::any::{TypeId, type_name};
-use std::collections::HashSet;
+use std::any::type_name;
 use std::fmt;
 use std::marker::PhantomData;
 
@@ -23,10 +22,12 @@ impl<N: 'static + Clone, C: Context, E: Expr<N, C>> Node<N, C, E> {
 impl<N, C, E> Node<N, C, E> {
     /// Builds a node from a leaf supplied by the caller.
     ///
-    /// `E` is the node's own shape, so a leaf of your own becomes a node here:
-    /// the leaf can carry a dependency key of its own, which a variable built
-    /// through [`Node::new`] cannot. [`var_leaf!`](crate::var_leaf) generates such
-    /// a leaf for one attribute.
+    /// `E` is the node's own shape, so a leaf of your own becomes a node here.
+    /// The reason to write one is its dependency key: a leaf reports a key of its
+    /// own, which a variable built through [`Node::new`] cannot (it reports the key
+    /// of `VarExpr<N, C>`). For per-attribute identity without writing a leaf, use
+    /// [`Node::var`], which keys a variable by name; [`var_leaf!`](crate::var_leaf)
+    /// generates a type-keyed leaf for one attribute.
     ///
     /// This is the only way to build a node from a leaf you wrote. `Node`'s
     /// `_marker` field is private, so the `Node { expr, _marker: PhantomData }`
@@ -97,8 +98,52 @@ where
     }
 
     #[inline(always)]
-    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+    fn get_dependencies(&self, deps: &mut Deps) {
         self.expr.get_dependencies(deps);
+    }
+}
+
+impl<N, C: Context, E: Expr<N, C>> Node<N, C, E> {
+    /// The dependency keys of every leaf below this node.
+    ///
+    /// The ordinary entry point: it builds the [`Deps`] sink, walks the tree
+    /// through [`Expr::get_dependencies`], and hands back the keys — no sink to
+    /// declare and no trait method to name.
+    ///
+    /// The answer is the same **may-read superset** documented on
+    /// [`Expr::get_dependencies`], and iteration order is equally unspecified; see
+    /// [`Deps`]. A tree of literals has no keys at all.
+    ///
+    /// ```
+    /// use express_it::prelude::*;
+    ///
+    /// struct Stats {
+    ///     hp: f32,
+    /// }
+    ///
+    /// struct GameCtx;
+    ///
+    /// impl Context for GameCtx {
+    ///     type ContextItem<'w, 's> = Stats;
+    /// }
+    ///
+    /// var_leaf!(pub Max, f32, GameCtx, |_ctx| 100.0f32);
+    ///
+    /// let hp = Node::<f32, GameCtx, _>::var("hp", |ctx: &Stats| ctx.hp);
+    /// let max = Node::<f32, GameCtx, _>::from_expr(Max);
+    /// let ratio = (hp / max).clamp(0.0, 1.0);
+    ///
+    /// let deps = ratio.dependencies();
+    /// assert_eq!(deps.len(), 2, "the named variable and the leaf");
+    /// assert!(deps.contains_name("hp"));
+    /// assert!(deps.contains_type_of::<Max>());
+    /// assert!(Node::<f32, GameCtx, _>::lit(1.0).dependencies().is_empty());
+    /// ```
+    #[inline]
+    pub fn dependencies(&self) -> Deps {
+        let mut deps = Deps::new();
+        self.expr.get_dependencies(&mut deps);
+        deps
     }
 }
 
@@ -131,8 +176,28 @@ impl<N: 'static, C: Context, E: Copy> Copy for CacheSaveStep<N, C, E> {}
 
 pub type Var<N, C> = Node<N, C, VarExpr<N, C>>;
 
+/// The leaf behind a variable: how to read the value, and how to name the
+/// dependency.
+///
+/// `key` is the whole difference between the two ways to build this node:
+///
+/// * [`Node::new`] leaves it `None`, so the variable reports the key of
+///   `VarExpr<N, C>` — one key shared by every variable of one value type and one
+///   context.
+/// * [`Node::var`] fills it in, so the variable reports a
+///   [`DepKey::Name`] and each attribute is its own key
+///   with no leaf type written.
+///
+/// The field is public because the struct is, and a `VarExpr` built by hand can
+/// set it; the two constructors cover what a caller normally wants.
 pub struct VarExpr<N, C: Context> {
     pub fetch_fn: for<'w, 's> fn(&C::ContextItem<'w, 's>) -> N,
+    /// The variable's own name, or `None` to be keyed by this leaf's type.
+    ///
+    /// Compared by exact string equality once it reaches a
+    /// [`Deps`] set, so one attribute has to be spelled one way
+    /// everywhere.
+    pub key: Option<&'static str>,
 }
 
 impl<N, C: Context> Clone for VarExpr<N, C> {
@@ -142,9 +207,79 @@ impl<N, C: Context> Clone for VarExpr<N, C> {
 }
 
 impl<N, C: Context> Node<N, C, VarExpr<N, C>> {
-    /// Constructs a variable node pre-wrapped for math operations
+    /// Constructs a variable node pre-wrapped for math operations.
+    ///
+    /// The variable reports the key of `VarExpr<N, C>`, so **every variable built
+    /// through `Node::new` with one value type and one context shares a single
+    /// dependency key** — `hp` and `defense` are the same key to anything watching
+    /// [`Node::dependencies`]. Use it when that is what you want: a tree that only
+    /// ever needs "some `f32` of this context changed", with one leaf type per
+    /// value type to invalidate. When sharing is wrong — when the two attributes
+    /// have to be told apart — [`Node::var`] keys by name and `var_leaf!` keys by
+    /// leaf type, and either gives per-attribute identity.
+    #[inline(always)]
     pub fn new(fetch_fn: fn(&C::ContextItem<'_, '_>) -> N) -> Self {
-        Self::from_expr(VarExpr { fetch_fn })
+        Self::from_expr(VarExpr {
+            fetch_fn,
+            key: None,
+        })
+    }
+
+    /// Constructs a variable node whose dependency key is `key`, its name.
+    ///
+    /// This is per-attribute dependency identity without a leaf type: the key goes
+    /// into the [`Deps`] set as
+    /// [`DepKey::Name`], so two variables of one value
+    /// type and one context are two keys as long as their names differ. [`Node::new`]
+    /// cannot express that — its two variables of one value type collapse to one key
+    /// — and it is exactly what a dependency-driven invalidation layer needs.
+    ///
+    /// Names are compared by exact string equality: `"hp"` and `"HP"` are two
+    /// different keys. A name key never collides with a type key either, so a named
+    /// variable and a [`var_leaf!`](crate::var_leaf) leaf sit in one `Deps` set
+    /// side by side. The name is *not* used by `Display` — a tree of named variables
+    /// still prints `var` for each of them.
+    ///
+    /// ```
+    /// use express_it::prelude::*;
+    ///
+    /// struct Stats {
+    ///     hp: f32,
+    ///     defense: f32,
+    /// }
+    ///
+    /// struct GameCtx;
+    ///
+    /// impl Context for GameCtx {
+    ///     type ContextItem<'w, 's> = Stats;
+    /// }
+    ///
+    /// // The same two attributes built with `Node::new`: one key between them,
+    /// // because both report the key of `VarExpr<f32, GameCtx>`.
+    /// let hp = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.hp);
+    /// let defense = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.defense);
+    /// assert_eq!(hp.dependencies(), defense.dependencies());
+    /// assert_eq!((hp + defense).dependencies().len(), 1);
+    ///
+    /// // Named: two keys, each answerable by name.
+    /// let hp = Node::<f32, GameCtx, _>::var("hp", |ctx: &Stats| ctx.hp);
+    /// let defense = Node::<f32, GameCtx, _>::var("defense", |ctx: &Stats| ctx.defense);
+    /// let deps = (hp + defense).dependencies();
+    /// assert_eq!(deps.len(), 2);
+    /// assert!(deps.contains_name("hp"));
+    /// assert!(deps.contains_name("defense"));
+    /// assert!(!deps.contains_name("attack"), "a name it never reads");
+    ///
+    /// // Evaluation is untouched: only key collection changed.
+    /// let stats = Stats { hp: 60.0, defense: 12.0 };
+    /// assert_eq!((hp + defense).eval(&stats), 72.0);
+    /// ```
+    #[inline(always)]
+    pub fn var(key: &'static str, fetch_fn: fn(&C::ContextItem<'_, '_>) -> N) -> Self {
+        Self::from_expr(VarExpr {
+            fetch_fn,
+            key: Some(key),
+        })
     }
 }
 
@@ -154,14 +289,20 @@ impl<N: 'static, C: Context + 'static> Expr<N, C> for VarExpr<N, C> {
         (self.fetch_fn)(ctx)
     }
 
-    /// Reports the key of this variable. Note that the key is the identity of
-    /// `VarExpr<N, C>` itself, so every variable built through [`Node::new`] with
-    /// the same value type and the same context shares a single key. A leaf that
-    /// needs per-variable identity carries its own key instead, which is what a
-    /// custom `Expr` leaf does when it is the `E` parameter of `Node` — and
-    /// [`var_leaf!`](crate::var_leaf) generates such a leaf for one attribute.
-    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
-        deps.insert(TypeId::of::<Self>());
+    /// Reports this variable's key: its own name when it has one, and otherwise
+    /// the identity of `VarExpr<N, C>`.
+    ///
+    /// So a [`Node::var`] variable is a key of its own, while every [`Node::new`]
+    /// variable of one value type and one context shares a single key — the
+    /// documented behaviour of that constructor, and what
+    /// [`var_leaf!`](crate::var_leaf) exists to get around when a type is preferred
+    /// over a name.
+    fn get_dependencies(&self, deps: &mut Deps) {
+        let key = match self.key {
+            Some(name) => DepKey::name(name),
+            None => DepKey::type_of::<Self>(),
+        };
+        deps.insert(key);
     }
 }
 
@@ -174,19 +315,28 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 }
 
 /// Declares a zero-sized leaf for one attribute: a type implementing
-/// [`Expr`](crate::expr::Expr) whose dependency key is its own `TypeId` and whose
+/// [`Expr`](crate::expr::Expr) whose dependency key is its own type
+/// ([`DepKey::Type`]) and whose
 /// [`Display`](std::fmt::Display) name is its own.
 ///
 /// Read as: make a leaf called `$name`, visible as `$vis`, whose value is a
 /// `$value`, read out of `$ctx`, by running the body of `|$bind| ..` against the
 /// context item. Hand the leaf to [`Node::from_expr`] to get a node.
 ///
+/// **A name instead of a type:** [`Node::var`] keys a variable by
+/// [`DepKey::Name`] and writes no leaf at all, so
+/// per-attribute dependency identity does not require this macro. Use `Node::var`
+/// when all you need is for two attributes to be two keys; use this macro when the
+/// leaf type itself is worth having, because it also buys a `Display` name for the
+/// tree and a fetch compiled into `eval`. The two schemes coexist: one `Deps` set
+/// holds a name key and a type key side by side.
+///
 /// Why a type per attribute rather than a closure: a variable built with
 /// [`Node::new`] reports the key of `VarExpr<N, C>`, so every variable of one
 /// value type and one context shares a single key and cannot be told apart. What
 /// [`Expr::get_dependencies`](crate::expr::Expr::get_dependencies) needs is a key
 /// that distinguishes the leaf, and a leaf can get one either way: a per-attribute
-/// type reports `TypeId::of::<Self>()`, and a single generic leaf parameterized
+/// type reports `DepKey::type_of::<Self>()`, and a single generic leaf parameterized
 /// per attribute reports the key of its type parameter instead — the shape this
 /// crate's own test leaf `dep_probe::Probe<A>` uses, and the one
 /// `benches/float.rs` writes by hand as `Leaf<K>`. The macro chooses the first
@@ -301,8 +451,6 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 ///
 /// ```
 /// use express_it::prelude::*;
-/// use std::any::TypeId;
-/// use std::collections::HashSet;
 ///
 /// struct Stats {
 ///     hp: f32,
@@ -318,12 +466,6 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 /// var_leaf!(pub Health, f32, GameCtx, |ctx| ctx.hp);
 /// var_leaf!(pub Attack, f32, GameCtx, |ctx| ctx.attack);
 ///
-/// fn keys<N, C: Context, E: Expr<N, C>>(node: &Node<N, C, E>) -> HashSet<TypeId> {
-///     let mut deps = HashSet::new();
-///     node.get_dependencies(&mut deps);
-///     deps
-/// }
-///
 /// let health = Node::<f32, GameCtx, _>::from_expr(Health);
 /// let attack = Node::<f32, GameCtx, _>::from_expr(Attack);
 /// let stats = Stats { hp: 60.0, attack: 24.0 };
@@ -332,17 +474,28 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
 /// assert_eq!((health + attack).eval(&stats), 84.0);
 /// assert_eq!(health.to_string(), "Health", "and the leaf prints its own name");
 ///
-/// // The point of the macro: two attributes, two keys.
-/// assert_ne!(keys(&health), keys(&attack));
+/// // The point of the macro: two attributes, two type keys.
+/// assert_ne!(health.dependencies(), attack.dependencies());
+/// assert!(health.dependencies().contains_type_of::<Health>());
 ///
 /// // And a tree of the two reports both, not one merged key.
-/// assert_eq!(keys(&(health + attack)).len(), 2);
+/// assert_eq!((health + attack).dependencies().len(), 2);
 ///
 /// // The same pair built through `Node::new` collapses to one key.
 /// let hp_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.hp);
 /// let atk_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.attack);
-/// assert_eq!(keys(&hp_var), keys(&atk_var));
-/// assert_eq!(keys(&hp_var).len(), 1);
+/// assert_eq!(hp_var.dependencies(), atk_var.dependencies());
+/// assert_eq!(hp_var.dependencies().len(), 1);
+///
+/// // `Node::var` separates them again with no leaf type, by name instead — and a
+/// // name key is not a type key, so the two schemes never overlap.
+/// let hp_named = Node::<f32, GameCtx, _>::var("hp", |ctx: &Stats| ctx.hp);
+/// let atk_named = Node::<f32, GameCtx, _>::var("attack", |ctx: &Stats| ctx.attack);
+/// let named = (hp_named + atk_named).dependencies();
+/// assert_eq!(named.len(), 2);
+/// assert!(named.contains_name("hp"));
+/// assert!(named.contains_name("attack"));
+/// assert!(!named.contains_type_of::<Health>());
 /// ```
 #[macro_export]
 macro_rules! var_leaf {
@@ -360,8 +513,8 @@ macro_rules! var_leaf {
                 $body
             }
 
-            fn get_dependencies(&self, deps: &mut ::std::collections::HashSet<::std::any::TypeId>) {
-                deps.insert(::std::any::TypeId::of::<Self>());
+            fn get_dependencies(&self, deps: &mut $crate::expr::Deps) {
+                deps.insert($crate::expr::DepKey::type_of::<Self>());
             }
         }
 
@@ -493,7 +646,7 @@ where
         self.inner.eval(ctx).as_cast()
     }
 
-    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+    fn get_dependencies(&self, deps: &mut Deps) {
         self.inner.get_dependencies(deps);
     }
 }
@@ -620,18 +773,138 @@ mod tests {
 
     #[test]
     fn vars_built_through_node_new_share_one_key() {
-        // Documented limitation: VarExpr reports the identity of VarExpr<N, C>,
-        // not of the variable, so two different variables of one value type and
-        // one context collapse to a single key. Pinned so that giving variables
-        // their own key has to change this test on purpose.
+        // Documented limitation: a VarExpr with no name reports the identity of
+        // VarExpr<N, C>, not of the variable, so two different variables of one
+        // value type and one context collapse to a single key. Pinned so that
+        // giving variables their own key has to change this test on purpose — and
+        // `Node::var` is the key it was given instead, which leaves this
+        // behaviour of `Node::new` exactly as it was.
         let attack: Node<f32, Ctx, _> = Node::new(|()| 10.0f32);
         let defense: Node<f32, Ctx, _> = Node::new(|()| 2.0f32);
 
-        let mut deps = HashSet::new();
+        let mut deps = Deps::new();
         attack.get_dependencies(&mut deps);
         defense.get_dependencies(&mut deps);
 
         assert_eq!(deps.len(), 1, "both variables report the same VarExpr key");
+    }
+
+    #[test]
+    fn named_variables_of_one_value_type_get_their_own_keys() {
+        // The case `Node::new` cannot express, and the point of `Node::var`: same
+        // value type, same context, two attributes, two keys.
+        let hp: Node<f32, Ctx, _> = Node::var("hp", |()| 60.0f32);
+        let defense: Node<f32, Ctx, _> = Node::var("defense", |()| 12.0f32);
+
+        assert_ne!(
+            hp.dependencies(),
+            defense.dependencies(),
+            "two names are two keys"
+        );
+        assert_eq!(hp.dependencies().len(), 1);
+        assert!(hp.dependencies().contains_name("hp"));
+        assert!(defense.dependencies().contains_name("defense"));
+
+        let both = (hp + defense).dependencies();
+        assert_eq!(both.len(), 2, "and the composite reports both");
+        assert!(both.contains_name("hp") && both.contains_name("defense"));
+
+        // Exact string equality, so one attribute spelled two ways is two keys.
+        assert_ne!(DepKey::name("hp"), DepKey::name("HP"));
+
+        // Evaluation is untouched by any of this.
+        assert_eq!((hp + defense).eval(&()), 72.0);
+    }
+
+    #[test]
+    fn a_named_variable_and_a_var_leaf_leaf_report_two_keys_of_two_kinds() {
+        // The two keying schemes coexist in one set: one `Name` key, one `Type`
+        // key, and neither is mistaken for the other.
+        let hp = Node::<f32, Ctx, _>::var("hp", |()| 60.0f32);
+        let attack = Node::<f32, Ctx, _>::from_expr(ProbeAttack);
+        let tree = hp + attack;
+
+        let deps = tree.dependencies();
+        assert_eq!(deps.len(), 2, "exactly two keys");
+        assert!(deps.contains_name("hp"), "the named variable");
+        assert!(deps.contains_type_of::<ProbeAttack>(), "the leaf type");
+        assert!(!deps.contains_name("ProbeAttack"));
+        assert!(!deps.contains_type_of::<VarExpr<f32, Ctx>>());
+
+        let kinds: Vec<Option<&'static str>> = deps.iter().map(DepKey::as_name).collect();
+        assert_eq!(kinds.iter().filter(|n| n.is_some()).count(), 1);
+        assert_eq!(kinds.iter().filter(|n| n.is_none()).count(), 1);
+        assert_eq!(tree.eval(&()), 70.0);
+    }
+
+    #[test]
+    fn a_composite_is_a_superset_of_each_operand_and_of_nothing_more() {
+        let hp = Node::<f32, Ctx, _>::var("hp", |()| 60.0f32);
+        let attack = Node::<f32, Ctx, _>::from_expr(ProbeAttack);
+        let tree = hp + attack;
+
+        let composite = tree.dependencies();
+        assert!(composite.is_superset_of(&hp.dependencies()));
+        assert!(
+            composite.is_superset_of(&attack.dependencies()),
+            "the composite covers each operand's key set"
+        );
+        assert!(composite.is_superset_of(&composite));
+        assert!(
+            !hp.dependencies().is_superset_of(&attack.dependencies()),
+            "and one operand does not cover the other"
+        );
+
+        let unrelated: Deps = [DepKey::name("speed")].into_iter().collect();
+        assert!(
+            !composite.is_superset_of(&unrelated),
+            "a key the tree never reports breaks the superset"
+        );
+        assert!(
+            composite.is_superset_of(&Deps::new()),
+            "every set is a superset of the empty set"
+        );
+    }
+
+    #[test]
+    fn contains_name_and_contains_type_of_answer_for_the_right_kind() {
+        let hp = Node::<f32, Ctx, _>::var("hp", |()| 60.0f32);
+        let attack = Node::<f32, Ctx, _>::from_expr(ProbeAttack);
+        let deps = (hp + attack).dependencies();
+
+        assert!(deps.contains_name("hp"), "finds the name it holds");
+        assert!(deps.contains_type_of::<ProbeAttack>(), "finds the type");
+        assert!(
+            !deps.contains_name("attack"),
+            "rejects a name it does not hold"
+        );
+        assert!(
+            !deps.contains_type_of::<ProbeDefense>(),
+            "rejects a type it does not hold"
+        );
+        assert!(
+            !deps.contains_type_of::<VarExpr<f32, Ctx>>(),
+            "a named variable reports no type key at all"
+        );
+        assert!(
+            !deps.contains_name("ProbeAttack"),
+            "a type key is never found by name"
+        );
+        assert!(
+            deps.contains(DepKey::name("hp")),
+            "the same checks spelled with an explicit key"
+        );
+    }
+
+    #[test]
+    fn a_tree_of_literals_has_no_dependencies() {
+        // Nothing reachable reports a key, so the default `get_dependencies` body
+        // is what runs all the way down.
+        let tree = (Node::<f32, Ctx, _>::lit(2.0) + Node::<f32, Ctx, _>::lit(3.0)).cast::<i32>();
+
+        assert_eq!(tree.eval(&()), 5);
+        assert!(tree.dependencies().is_empty());
+        assert_eq!(tree.dependencies(), Deps::new());
     }
 
     /// A leaf written by hand, the way a consumer would write one: the shape
@@ -644,8 +917,8 @@ mod tests {
             7.5
         }
 
-        fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
-            deps.insert(TypeId::of::<Self>());
+        fn get_dependencies(&self, deps: &mut Deps) {
+            deps.insert(DepKey::type_of::<Self>());
         }
     }
 
@@ -693,17 +966,17 @@ mod tests {
             "Display comes from the leaf, so a tree of leaves reads by attribute"
         );
 
-        let mut leaf_keys = HashSet::new();
+        let mut leaf_keys = Deps::new();
         attack.get_dependencies(&mut leaf_keys);
         defense.get_dependencies(&mut leaf_keys);
         assert_eq!(leaf_keys.len(), 2, "one key per leaf type");
-        assert!(leaf_keys.contains(&TypeId::of::<ProbeAttack>()));
-        assert!(leaf_keys.contains(&TypeId::of::<ProbeDefense>()));
+        assert!(leaf_keys.contains_type_of::<ProbeAttack>());
+        assert!(leaf_keys.contains_type_of::<ProbeDefense>());
 
         // The claim the macro exists for, asserted on the composite itself rather
         // than on two merged single-leaf sets: a tree of two macro leaves reports
         // two dependency keys.
-        let mut composite_keys = HashSet::new();
+        let mut composite_keys = Deps::new();
         (attack + defense).get_dependencies(&mut composite_keys);
         assert_eq!(
             composite_keys.len(),
@@ -715,7 +988,7 @@ mod tests {
             "and they are the very keys the two leaves report alone"
         );
 
-        let mut var_keys = HashSet::new();
+        let mut var_keys = Deps::new();
         Node::<f32, Ctx, _>::new(|()| 10.0f32).get_dependencies(&mut var_keys);
         Node::<f32, Ctx, _>::new(|()| 2.0f32).get_dependencies(&mut var_keys);
         assert_eq!(

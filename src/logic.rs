@@ -1,7 +1,5 @@
-use crate::expr::{AsExpression, Context, Expr};
+use crate::expr::{AsExpression, Context, Deps, Expr};
 use crate::nodes::Node;
-use std::any::TypeId;
-use std::collections::HashSet;
 use std::fmt;
 
 #[derive(Copy, Clone)]
@@ -15,7 +13,7 @@ impl<C: Context, E: Expr<bool, C>> Expr<bool, C> for LogicalNotNode<E> {
         !self.inner.eval(ctx)
     }
 
-    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+    fn get_dependencies(&self, deps: &mut Deps) {
         self.inner.get_dependencies(deps);
     }
 }
@@ -74,7 +72,7 @@ macro_rules! impl_cmp_method {
                 self.lhs.eval(ctx) $operator self.rhs.eval(ctx)
             }
 
-            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+            fn get_dependencies(&self, deps: &mut Deps) {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
@@ -134,7 +132,7 @@ macro_rules! impl_logical_method {
                 self.lhs.eval(ctx) $operator self.rhs.eval(ctx)
             }
 
-            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+            fn get_dependencies(&self, deps: &mut Deps) {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
@@ -194,7 +192,7 @@ macro_rules! impl_neg_logical_method {
                 !(self.lhs.eval(ctx) $operator self.rhs.eval(ctx))
             }
 
-            fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+            fn get_dependencies(&self, deps: &mut Deps) {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
@@ -301,7 +299,12 @@ mod tests {
     fn var<N>(
         f: for<'a, 'w> fn(&'a &'w MockPlayerData) -> N,
     ) -> Node<N, MockEngine, VarExpr<N, MockEngine>> {
-        Node::from_expr(VarExpr { fetch_fn: f })
+        // `key: None`: these test variables are keyed by type, exactly as a
+        // `Node::new` variable is.
+        Node::from_expr(VarExpr {
+            fetch_fn: f,
+            key: None,
+        })
     }
 
     #[test]

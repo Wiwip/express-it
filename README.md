@@ -14,7 +14,7 @@ a per-run typed cache, or both. Steps run in order, so step *N* sees what step
 *N-1* wrote.
 
 ```text
-express_it::expr    Context / ContextMut, Expr, AsExpression, StoredExpr
+express_it::expr    Context / ContextMut, Expr, AsExpression, StoredExpr, DepKey, Deps
 express_it::nodes   Node, Var, VarExpr, CacheSaveStep; LiteralNode and CastNode,
                     the tree shapes, live here and only here — see the last line
 express_it::ops     + - * / %, unary - and !, powf, min, max, abs, acos, sqrt, clamp
@@ -40,10 +40,10 @@ express-it = "0.2"
 ## Building an expression
 
 `Node<N, C, E>` is the tree: `N` is the value type, `C` is your context (where
-variables read from), `E` is the node's own shape. You build trees through the
-three constructors — `Node::lit` for a constant, `Node::new` for a variable, and
-`Node::from_expr` for a leaf of your own — and the operators, and you never name
-`E` yourself.
+variables read from), `E` is the node's own shape. You build trees through the four
+constructors — `Node::lit` for a constant, `Node::new` for a variable, `Node::var`
+for a variable that is its own dependency key, and `Node::from_expr` for a leaf of
+your own — and the operators, and you never name `E` yourself.
 
 ```rust
 use express_it::prelude::*;
@@ -220,27 +220,79 @@ The prelude also carries the names a caller has to write down rather than call:
 `CacheSaveStep`, `CacheLookupStep`), and `AsCast` for a generic cast bound —
 enough to implement a custom step or name a cast bound from the one glob.
 
-## Known limitation: variables share one dependency key
+## Dependency keys: names and types
 
-`Expr::get_dependencies` collects the `TypeId` keys of the leaves a tree reads, so a
-caller can register interest before the first evaluation. A variable built with
-`Node::new` reports the key of `VarExpr<N, C>` rather than its own identity, so all
-variables of one value type and one context collapse to a single key. Two different
-variables are therefore indistinguishable to a dependency-driven invalidation layer.
+`Expr::get_dependencies` collects the keys of the leaves a tree reads, so a caller
+can register interest before the first evaluation. Ask a node for its keys with
+`node.dependencies()`: it hands back a `Deps` set. Two caveats travel with it. The
+answer is a **may-read superset** — `a && b` reports both operands even though a
+live `eval` short-circuits — and its iteration order is unspecified, because it is
+a hash set; `Deps` is comparable for equality but has no ordering.
 
-Give each attribute its own leaf type and the keys separate. `var_leaf!` declares
-one — a zero-sized `Expr` implementor whose `get_dependencies` inserts its own
-`TypeId` and whose `Display` prints its own name — and `Node::from_expr` makes a node
-out of it. The name is written with the visibility the leaf should have (`pub` here,
-`pub(crate)`, `pub(super)`, or nothing for a leaf private to its module); the macro
-inserts no visibility of its own, so a call that names none now generates a private
-leaf where 0.2 generated a `pub` one. The last argument is the fetch, `|ctx| ..`,
-with `ctx` bound to a reference to your context item:
+A key is a `DepKey`, and there are two kinds:
+
+* `DepKey::Name` — a variable's **name**, reported by `Node::var`. Two attributes
+  of one value type and one context are two keys, with no leaf type written. Names
+  compare by exact string equality, so `"hp"` and `"HP"` are two keys.
+* `DepKey::Type` — a leaf **type**'s identity, reported by `var_leaf!` and by a
+  hand-written leaf. `Node::new` reports this kind too: the key of `VarExpr<N, C>`,
+  so every variable built that way with one value type and one context shares a
+  single key.
 
 ```rust
 use express_it::prelude::*;
-use std::any::TypeId;
-use std::collections::HashSet;
+
+struct Stats {
+    health: f32,
+    attack: f32,
+}
+
+struct GameCtx;
+
+impl Context for GameCtx {
+    type ContextItem<'w, 's> = Stats;
+}
+
+// Named: one key per attribute, and you can ask a set for one attribute by name.
+let hp = Node::<f32, GameCtx, _>::var("health", |ctx: &Stats| ctx.health);
+let attack = Node::<f32, GameCtx, _>::var("attack", |ctx: &Stats| ctx.attack);
+
+let deps = (hp + attack).dependencies();
+assert_eq!(deps.len(), 2);
+assert!(deps.contains_name("health"));
+assert!(deps.contains_name("attack"));
+assert!(!deps.contains_name("defense"), "a name the tree never reads");
+assert!(deps.is_superset_of(&hp.dependencies()));
+
+// The same two attributes as `Node::new` variables: one key between them, so a
+// dependency layer cannot tell them apart.
+let hp_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.health);
+let attack_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.attack);
+assert_eq!(hp_var.dependencies(), attack_var.dependencies());
+assert_eq!((hp_var + attack_var).dependencies().len(), 1);
+
+// Keys are a collection like any other: iterate, union, or test membership.
+let mut both = hp.dependencies();
+both.union_with(&attack.dependencies());
+assert_eq!(both.iter().filter(|key| key.as_name().is_some()).count(), 2);
+
+// A tree of literals reads nothing at all.
+assert!(Node::<f32, GameCtx, _>::lit(1.0).dependencies().is_empty());
+```
+
+Give each attribute its own leaf type instead of a name and the keys separate the
+same way — a leaf's key is then its own type. `var_leaf!` declares such a leaf: a
+zero-sized `Expr` implementor whose `get_dependencies` inserts
+`DepKey::type_of::<Self>()` and whose `Display` prints its own name, and
+`Node::from_expr` makes a node out of it. The name is written with the visibility
+the leaf should have (`pub` here, `pub(crate)`, `pub(super)`, or nothing for a leaf
+private to its module); the macro inserts no visibility of its own, so a call that
+names none now generates a private leaf where 0.2 generated a `pub` one. The last
+argument is the fetch, `|ctx| ..`, with `ctx` bound to a reference to your context
+item:
+
+```rust
+use express_it::prelude::*;
 
 struct Stats {
     health: f32,
@@ -256,30 +308,34 @@ impl Context for GameCtx {
 var_leaf!(pub Health, f32, GameCtx, |ctx| ctx.health);
 var_leaf!(pub Attack, f32, GameCtx, |ctx| ctx.attack);
 
-fn keys<N, C: Context, E: Expr<N, C>>(node: &Node<N, C, E>) -> HashSet<TypeId> {
-    let mut deps = HashSet::new();
-    node.get_dependencies(&mut deps);
-    deps
-}
-
 let health = Node::<f32, GameCtx, _>::from_expr(Health);
 let attack = Node::<f32, GameCtx, _>::from_expr(Attack);
 
-// Two attributes, two keys, and the tree reads by attribute name.
-assert_ne!(keys(&health), keys(&attack));
+// Two attributes, two type keys, and the tree reads by attribute name.
+assert_ne!(health.dependencies(), attack.dependencies());
+assert!(health.dependencies().contains_type_of::<Health>());
 assert_eq!((health + attack).to_string(), "(Health + Attack)");
 
-// The same two attributes as `Node::new` variables: one key between them.
-let health_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.health);
-let attack_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.attack);
-assert_eq!(keys(&health_var), keys(&attack_var));
+// The two keying schemes coexist: one name key and one type key in the same set,
+// and neither is found by the other's check.
+let shield = Node::<f32, GameCtx, _>::var("shield", |ctx: &Stats| ctx.health * 2.0);
+let mixed = (health + shield).dependencies();
+assert_eq!(mixed.len(), 2);
+assert!(mixed.contains_type_of::<Health>());
+assert!(mixed.contains_name("shield"));
 ```
 
+Choose by what the identity is: a name via `Node::var` when the attribute is what
+you want to key on and nothing else, a type via `var_leaf!` when the leaf itself is
+worth having — a `Display` name for the tree, a fetch compiled into `eval`, a leaf
+several nodes share.
+
 Writing the leaf by hand works just as well: implement `Expr<N, C>` for your own
-type, insert your own key in `get_dependencies`, and hand it to `Node::from_expr`.
-`var_leaf!` is that shape spelled shorter. Everything else in the crate forwards
-dependencies downward, so a leaf's keys arrive intact however deep it sits in the
-tree.
+type, insert `DepKey::type_of::<Self>()` in `get_dependencies`, and hand it to
+`Node::from_expr` — the `Expr` trait doc (`express_it::expr::Expr`) shows that impl
+in full. `var_leaf!` is that shape spelled shorter. Everything else in the crate
+forwards dependencies downward, so a leaf's keys arrive intact however deep it sits
+in the tree.
 
 ## Version history
 

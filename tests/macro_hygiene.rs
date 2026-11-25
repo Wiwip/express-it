@@ -86,10 +86,10 @@ mod leaf_without_crate_imports {
 
     fn keys<E: express_it::expr::Expr<f32, Ctx>>(
         node: &express_it::nodes::Node<f32, Ctx, E>,
-    ) -> std::collections::HashSet<std::any::TypeId> {
-        let mut deps = std::collections::HashSet::new();
-        express_it::expr::Expr::get_dependencies(node, &mut deps);
-        deps
+    ) -> express_it::expr::Deps {
+        // `dependencies` is inherent on `Node`, so this needs no trait in scope at
+        // all — as befits a file whose subject is what the macros require.
+        node.dependencies()
     }
 
     #[test]
@@ -110,6 +110,10 @@ mod leaf_without_crate_imports {
             "Display prints the leaf's own name, not `var`"
         );
         assert_ne!(keys(&health), keys(&attack), "one key per leaf");
+        assert!(
+            keys(&health).contains_type_of::<Health>(),
+            "and the generated leaf's key is the identity of its own type"
+        );
     }
 }
 

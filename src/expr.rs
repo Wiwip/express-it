@@ -1,6 +1,7 @@
 use crate::nodes::{LiteralNode, Node, VarExpr};
 use std::any::TypeId;
 use std::collections::HashSet;
+use std::fmt;
 
 pub trait Context: Send + Sync {
     type ContextItem<'w, 's>;
@@ -14,6 +15,60 @@ pub trait ContextMut: Context {
     ) -> Self::ContextItem<'a, 's>;
 }
 
+/// What a tree evaluates, and which leaves it may read.
+///
+/// `N` is the value type, `C` the context a variable reads from. Every node in
+/// the crate implements it, and a leaf of your own implements it too — that is
+/// the whole contract a custom leaf has to satisfy, and it is two methods:
+/// `eval`, and [`get_dependencies`](Expr::get_dependencies) reporting the keys of
+/// the leaves below this node into a [`Deps`] sink.
+///
+/// A leaf that wants its own key reports one; a node that merely holds other
+/// expressions forwards the walk to its children. `var_leaf!` writes both halves
+/// of a leaf, [`Node::var`](crate::nodes::Node::var) needs no leaf at all, and
+/// neither is reachable from the other: the first gives a leaf its identity from
+/// its type, the second from a name.
+///
+/// ```
+/// use express_it::expr::{DepKey, Deps};
+/// use express_it::prelude::*;
+///
+/// struct Stats {
+///     hp: f32,
+/// }
+///
+/// struct GameCtx;
+///
+/// impl Context for GameCtx {
+///     type ContextItem<'w, 's> = Stats;
+/// }
+///
+/// // The shape a downstream implementor copies: a zero-sized leaf, one key.
+/// #[derive(Clone, Copy)]
+/// struct Hp;
+///
+/// impl Expr<f32, GameCtx> for Hp {
+///     fn eval(&self, ctx: &Stats) -> f32 {
+///         ctx.hp
+///     }
+///
+///     fn get_dependencies(&self, deps: &mut Deps) {
+///         deps.insert(DepKey::type_of::<Self>());
+///     }
+/// }
+///
+/// let hp = Node::<f32, GameCtx, _>::from_expr(Hp);
+///
+/// assert_eq!(hp.eval(&Stats { hp: 61.0 }), 61.0);
+///
+/// // `dependencies` is the caller-side accessor; `get_dependencies` above is the
+/// // method a leaf implements.
+/// let deps = hp.dependencies();
+/// assert_eq!(deps.len(), 1);
+/// assert!(deps.contains(DepKey::type_of::<Hp>()));
+/// assert!(deps.contains_type_of::<Hp>());
+/// assert!(!deps.contains_name("hp"), "a type key is not a name key");
+/// ```
 pub trait Expr<N, C: Context> {
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N;
 
@@ -33,9 +88,218 @@ pub trait Expr<N, C: Context> {
     ///
     /// Leaf identity is up to the leaf: the default implementation contributes
     /// nothing, which is correct for nodes that hold no variables (a literal).
-    /// Order is unspecified — the sink is a `HashSet`, so a caller that depends
-    /// on a particular order must sort the collected keys.
-    fn get_dependencies(&self, _deps: &mut HashSet<TypeId>) {}
+    /// Order is unspecified — the sink is a hash set of [`DepKey`]s, so a caller
+    /// that depends on a particular order must sort the collected keys.
+    ///
+    /// Callers ask for the keys of a node through
+    /// [`Node::dependencies`](crate::nodes::Node::dependencies), which builds the
+    /// sink and calls this; implementing it is for a leaf of your own, and the
+    /// [`Expr`] doc shows that impl.
+    fn get_dependencies(&self, _deps: &mut Deps) {}
+}
+
+/// One leaf's identity, as reported through [`Expr::get_dependencies`].
+///
+/// Two flavours, deliberately:
+///
+/// * [`DepKey::Type`] is the identity of a leaf *type*. [`var_leaf!`](crate::var_leaf)
+///   reports it, and so does a hand-written leaf through [`DepKey::type_of`]. Two
+///   leaves of one type are one key, which is what makes a type per attribute.
+/// * [`DepKey::Name`] is a variable *name*, reported by
+///   [`Node::var`](crate::nodes::Node::var). Two attributes of one value type and
+///   one context get two keys from their names alone, with no leaf type written.
+///
+/// A `Name` key is compared by **exact string equality**: `"hp"` and `"HP"` are two
+/// keys, and so are `"hp"` and `"hp "`. Nothing case-folds, trims, normalises, or
+/// parses a name, so one attribute spelled two ways is two keys to a dependency
+/// layer. A `Name` and a `Type` never collide either — they are different variants,
+/// so a name and a leaf type share nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DepKey {
+    /// Identity of a leaf type: what `var_leaf!` and hand-written leaves report.
+    Type(TypeId),
+    /// A named variable, keyed by its name rather than by its type.
+    Name(&'static str),
+}
+
+impl DepKey {
+    /// The key of the leaf type `T`: the `Type` variant.
+    ///
+    /// Use it from a leaf's `get_dependencies` when the leaf's own type is its
+    /// identity, as a `var_leaf!` leaf does.
+    #[inline(always)]
+    pub fn type_of<T: 'static>() -> Self {
+        DepKey::Type(TypeId::of::<T>())
+    }
+
+    /// The key of the variable named `key`: the `Name` variant.
+    ///
+    /// Exact string equality decides whether two of these are the same key, so
+    /// spell one attribute one way everywhere.
+    #[inline(always)]
+    pub fn name(key: &'static str) -> Self {
+        DepKey::Name(key)
+    }
+
+    /// The `TypeId` inside a [`DepKey::Type`] key, `None` for a name key.
+    #[inline(always)]
+    pub fn as_type_id(self) -> Option<TypeId> {
+        match self {
+            DepKey::Type(id) => Some(id),
+            DepKey::Name(_) => None,
+        }
+    }
+
+    /// The name inside a [`DepKey::Name`] key, `None` for a type key.
+    #[inline(always)]
+    pub fn as_name(self) -> Option<&'static str> {
+        match self {
+            DepKey::Name(name) => Some(name),
+            DepKey::Type(_) => None,
+        }
+    }
+}
+
+/// Renders the variant's prefix and what the variant actually holds: `var:<name>`
+/// for a name, `type:<Debug of the TypeId>` for a type.
+///
+/// There is no nicer rendering for the type half to print. A `TypeId` carries no
+/// name string — `Debug` is as close as it gets to naming the type, and on some
+/// builds it is only a hash — so printing anything else would be inventing a type
+/// name the runtime does not have.
+impl fmt::Display for DepKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DepKey::Name(name) => write!(f, "var:{name}"),
+            DepKey::Type(id) => write!(f, "type:{id:?}"),
+        }
+    }
+}
+
+/// The keys a tree reports, collected by [`Expr::get_dependencies`] and handed
+/// back by [`Node::dependencies`](crate::nodes::Node::dependencies).
+///
+/// A set of [`DepKey`]s: a leaf reached by two paths through the tree contributes
+/// one key, and a name key and a type key sit side by side in the same collection.
+///
+/// **Iteration order is unspecified**, and deliberately so — the backing store is
+/// a hash set. `Deps` is `PartialEq` (two sinks holding the same keys are equal,
+/// whatever order they went in) but is *not* `Ord` or `PartialOrd`: an ordering
+/// would claim a sequence the hash set does not have. A caller that wants keys in
+/// a stable order has to sort them itself — collect the strings from
+/// `DepKey::to_string`, or the `Option<&str>` from `as_name`, and sort those.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Deps {
+    keys: HashSet<DepKey>,
+}
+
+impl Deps {
+    /// An empty sink.
+    #[inline(always)]
+    pub fn new() -> Self {
+        Self {
+            keys: HashSet::new(),
+        }
+    }
+
+    /// Adds `key`; `false` when it was already there.
+    #[inline(always)]
+    pub fn insert(&mut self, key: DepKey) -> bool {
+        self.keys.insert(key)
+    }
+
+    /// Empties the sink, keeping its allocation.
+    ///
+    /// Exists so a caller can reuse one sink across many walks instead of
+    /// allocating a set per walk.
+    #[inline(always)]
+    pub fn clear(&mut self) {
+        self.keys.clear();
+    }
+
+    /// Whether `key` is in the set.
+    #[inline(always)]
+    pub fn contains(&self, key: DepKey) -> bool {
+        self.keys.contains(&key)
+    }
+
+    /// Whether the type key of `T` is in the set — the check for a leaf keyed by
+    /// its type (`var_leaf!`, a hand-written leaf, a [`Node::new`] variable).
+    #[inline(always)]
+    pub fn contains_type_of<T: 'static>(&self) -> bool {
+        self.keys.contains(&DepKey::type_of::<T>())
+    }
+
+    /// Whether the name key `name` is in the set — the check for a
+    /// [`Node::var`] variable. Exact string equality, as on [`DepKey::name`].
+    #[inline(always)]
+    pub fn contains_name(&self, name: &'static str) -> bool {
+        self.keys.contains(&DepKey::name(name))
+    }
+
+    /// How many keys the set holds.
+    #[inline(always)]
+    pub fn len(&self) -> usize {
+        self.keys.len()
+    }
+
+    /// Whether the set holds no key at all — true for a tree of literals.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+
+    /// Iterates the keys, in unspecified order.
+    #[inline(always)]
+    pub fn iter(&self) -> impl Iterator<Item = DepKey> + '_ {
+        self.keys.iter().copied()
+    }
+
+    /// Whether every key of `other` is also in `self`.
+    ///
+    /// The containment test a dependency layer wants: a composite's keys are a
+    /// superset of each operand's, so "does this tree read what that tree reads?"
+    /// is one call. The empty set is a subset of everything, so `is_superset_of`
+    /// against an empty `other` is always true.
+    #[inline(always)]
+    pub fn is_superset_of(&self, other: &Deps) -> bool {
+        self.keys.is_superset(&other.keys)
+    }
+
+    /// Adds every key of `other` to `self` — the keys of two subtrees, say.
+    #[inline(always)]
+    pub fn union_with(&mut self, other: &Deps) {
+        self.keys.extend(other.keys.iter().copied());
+    }
+}
+
+impl FromIterator<DepKey> for Deps {
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = DepKey>>(iter: I) -> Self {
+        Self {
+            keys: iter.into_iter().collect(),
+        }
+    }
+}
+
+impl IntoIterator for Deps {
+    type Item = DepKey;
+    type IntoIter = std::collections::hash_set::IntoIter<DepKey>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.keys.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Deps {
+    type Item = DepKey;
+    type IntoIter = std::iter::Copied<std::collections::hash_set::Iter<'a, DepKey>>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.keys.iter().copied()
+    }
 }
 
 pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
@@ -61,7 +325,7 @@ impl<N, C: Context, E: Expr<N, C> + ?Sized> Expr<N, C> for Box<E> {
     }
 
     #[inline(always)]
-    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+    fn get_dependencies(&self, deps: &mut Deps) {
         (**self).get_dependencies(deps);
     }
 }
@@ -164,5 +428,105 @@ mod tests {
             set([key::<Attack>(), key::<Defense>()]),
             "get_dependencies forwards through the box"
         );
+    }
+
+    #[test]
+    fn deps_equality_ignores_insertion_order_and_insert_is_idempotent() {
+        // Equality is set equality: a hash set has no order to compare, and two
+        // sinks holding the same keys are the same answer.
+        let mut forwards = Deps::new();
+        assert!(
+            forwards.insert(DepKey::name("hp")),
+            "the first insert reports a new key"
+        );
+        assert!(forwards.insert(DepKey::name("defense")));
+
+        let mut backwards: Deps = [DepKey::name("defense"), DepKey::name("hp")]
+            .into_iter()
+            .collect();
+        assert_eq!(
+            forwards, backwards,
+            "same keys in another order are still equal"
+        );
+
+        assert!(
+            !forwards.insert(DepKey::name("hp")),
+            "re-inserting a key reports false and changes nothing"
+        );
+        assert_eq!(forwards.len(), 2, "and the set stays two keys");
+        assert_eq!(
+            forwards, backwards,
+            "so an idempotent insert preserves equality"
+        );
+
+        // A name and a type never compare equal, even for the same attribute.
+        assert_ne!(
+            DepKey::name("hp"),
+            DepKey::type_of::<crate::nodes::VarExpr<f32, crate::dep_probe::ProbeCtx>>(),
+            "the two keying schemes do not overlap"
+        );
+
+        backwards.insert(DepKey::name("haste"));
+        assert_ne!(forwards, backwards, "and one extra key makes them unequal");
+    }
+
+    #[test]
+    fn dep_key_accessors_split_the_two_variants() {
+        let named = DepKey::name("hp");
+        let typed = DepKey::type_of::<u32>();
+
+        assert_eq!(named.as_name(), Some("hp"));
+        assert_eq!(named.as_type_id(), None);
+        assert_eq!(typed.as_type_id(), Some(TypeId::of::<u32>()));
+        assert_eq!(typed.as_name(), None);
+
+        // `type_of` is `TypeId::of` under another name, and distinct types are
+        // distinct keys.
+        assert_eq!(typed, DepKey::Type(TypeId::of::<u32>()));
+        assert_ne!(typed, DepKey::type_of::<i32>());
+    }
+
+    #[test]
+    fn dep_key_display_renders_both_variants_with_their_prefixes() {
+        assert_eq!(DepKey::name("defense").to_string(), "var:defense");
+        assert_eq!(
+            DepKey::type_of::<u32>().to_string(),
+            format!("type:{:?}", TypeId::of::<u32>()),
+            "the type half prints what a TypeId actually offers: its Debug, prefixed"
+        );
+    }
+
+    #[test]
+    fn deps_iterate_into_keys_and_union_merges_them() {
+        let hp: Deps = [DepKey::name("hp")].into_iter().collect();
+        let defense: Deps = [DepKey::name("defense")].into_iter().collect();
+
+        let mut merged = hp.clone();
+        merged.union_with(&defense);
+
+        assert_eq!(merged.len(), 2);
+        assert!(merged.is_superset_of(&hp));
+        assert!(merged.is_superset_of(&defense));
+        assert!(!hp.is_superset_of(&defense));
+
+        // `iter`, `for` over a reference, and `for` over the value all yield
+        // `DepKey` itself, not a reference to one.
+        let mut printed: Vec<String> = merged.iter().map(|key| key.to_string()).collect();
+        printed.sort();
+        assert_eq!(printed, ["var:defense", "var:hp"]);
+
+        let mut by_ref: Vec<DepKey> = (&merged).into_iter().collect();
+        by_ref.sort_by_key(|key| key.to_string());
+        assert_eq!(by_ref, [DepKey::name("defense"), DepKey::name("hp")]);
+
+        assert!(!merged.is_empty());
+        let by_value: Vec<DepKey> = merged.into_iter().collect();
+        assert_eq!(by_value.len(), 2, "and consuming the set yields each key");
+
+        let mut emptied = Deps::new();
+        assert!(emptied.is_empty());
+        emptied.insert(DepKey::name("hp"));
+        emptied.clear();
+        assert!(emptied.is_empty(), "clear empties the sink for reuse");
     }
 }

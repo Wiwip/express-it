@@ -12,13 +12,11 @@
 //! `StoredExpr` straight into `.ge(..)` is still a compile error, and that is a
 //! pre-existing bound of those two modules rather than something this alias can fix.
 
-use express_it::expr::{Context, ContextMut, Expr, StoredExpr};
+use express_it::expr::{Context, ContextMut, DepKey, Deps, Expr, StoredExpr};
 use express_it::nodes::{Node, VarExpr};
 use express_it::ops::ExprClamp;
 use express_it::plan::Plan;
 use express_it::save;
-use std::any::TypeId;
-use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct State {
@@ -51,8 +49,8 @@ impl Expr<f32, Ctx> for Regen {
         4.0
     }
 
-    fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
-        deps.insert(TypeId::of::<Self>());
+    fn get_dependencies(&self, deps: &mut Deps) {
+        deps.insert(DepKey::type_of::<Self>());
     }
 }
 
@@ -86,12 +84,20 @@ fn a_boxed_sub_expression_composes_into_a_tree() {
 
 #[test]
 fn a_boxed_sub_expression_forwards_its_dependency_keys() {
-    let mut deps = HashSet::new();
-    (boxed_regen() + hp()).get_dependencies(&mut deps);
+    let deps = (boxed_regen() + hp()).dependencies();
 
     assert!(
-        deps.contains(&TypeId::of::<Regen>()),
+        deps.contains_type_of::<Regen>(),
         "the key of the boxed leaf arrives through the box"
+    );
+    assert!(
+        deps.contains_type_of::<VarExpr<f32, Ctx>>(),
+        "and so does the key of the variable beside it"
+    );
+    assert_eq!(
+        deps.len(),
+        2,
+        "one from each child, neither swallowed by the box"
     );
 }
 
