@@ -12,8 +12,9 @@ use std::fmt;
 /// `ContextItem` is a generic associated type so a context can hand out a borrow
 /// of its state (`&'w State`) instead of a copy of it. A context whose read view
 /// is the state by value simply ignores both parameters, which most examples in
-/// this crate do; `examples/expr_demo.rs` and the borrowing `as_readonly` example
-/// further down this page hand out a borrow instead.
+/// this crate do; `examples/expr_demo.rs` borrows, and so does
+/// [`ContextMut::as_readonly`], whose worked example shows the lifetime a borrow
+/// has to land in.
 ///
 /// The trait requires `Send + Sync`, so the *context type* must be safe to share
 /// between threads. Single-threaded interior mutability is therefore rejected:

@@ -130,10 +130,12 @@ and `VarExpr::with_key` constructors, which cannot drift like this again.
   about a manifest with no `license` and packages anyway — measured, exit 0 — so
   this is a licensing decision rather than a packaging fix, and the CI job
   asserts the field and both texts because cargo itself will not.
-* The centre of the API now has documentation. `Context`, `ContextMut`,
-  `ContextMut::as_readonly`, `Expr::eval`, `AsExpression` and its `Target`, all
-  five public modules, `Node::lit`, `Node::alias`, `Node::expr` and both
-  `CacheSaveStep` fields were bare declarations before, and `as_readonly` is the one signature a user has to get
+* The centre of the API now has documentation. `Context` and its `ContextItem`,
+  `ContextMut` with its `ContextItemMut` and `as_readonly`, `Expr::eval`,
+  `AsExpression` and its `Target`, all five public modules, `Node::lit`,
+  `Node::alias`, `Node::expr` and both `CacheSaveStep` fields were bare
+  declarations before — eighteen items, which is exactly the 167-to-149 drop in
+  `missing_docs` warnings. `as_readonly` is the one signature a user has to get
   exactly right: three named lifetimes, with `'a` and `'s` — not `'w` — in the
   return type. Writing it with `'_` instead gives `E0106` plus `E0195` and points
   nowhere useful, so the trait page now carries a working implementation and a

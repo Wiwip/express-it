@@ -20,14 +20,16 @@ pub mod logic;
 /// constructors (`lit`, `new`, `var`, `from_expr`), the `var_leaf!` macro, the
 /// `cast` conversions, and the cache-save step.
 pub mod nodes;
-/// Arithmetic: the `+ - * / %` operator impls on `Node` — for `+ - * /` a
-/// primitive may sit on the left, while `%` needs a `Node` on the left — and the
-/// method nodes `powf`, `min`, `max`, `abs`, `sqrt`, `acos`, `clamp`.
+/// Arithmetic: the `+ - * / %` binary operator impls on `Node` — for `+ - * /` a
+/// primitive may sit on the left, while `%` needs a `Node` on the left — the
+/// unary `-` and `!` impls, and the method nodes `powf`, `min`, `max`, `abs`,
+/// `sqrt`, `acos`, `clamp`. The three arguments of `clamp` are either all nodes
+/// or all primitives; `node.clamp(0.0, node)` is a type error.
 ///
-/// Its public items are the node structs those methods build (`AddNode`,
-/// `MaxNode`, `FloatClampNode`, …) and the extension traits that attach the
-/// methods to `Node` (`ExprMax`, `ExprClamp`, …); seven of the latter are
-/// re-exported by the prelude. There are no free functions.
+/// Its public items are the node structs those operators and methods build
+/// (`AddNode`, `NegNode`, `MaxNode`, `FloatClampNode`, …) and the seven extension
+/// traits that attach the methods to `Node` (`ExprMax`, `ExprClamp`, …), all
+/// seven of which the prelude re-exports. There are no free functions.
 pub mod ops;
 /// Ordered side effects: [`Plan`](plan::Plan), the step types, the
 /// [`PlanCache`](plan::PlanCache), [`PlanError`](plan::PlanError), and the
