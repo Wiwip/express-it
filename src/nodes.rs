@@ -7,12 +7,39 @@ use std::marker::PhantomData;
 
 pub struct Node<N, C, E> {
     pub expr: E,
+    /// Carries the `N` and `C` parameters, which the struct otherwise would not
+    /// mention. Hidden from the docs rather than private: the field stays `pub`,
+    /// so a `Node { expr, _marker }` literal written before [`Node::from_expr`]
+    /// existed keeps compiling, while `from_expr` is the route the docs show.
+    #[doc(hidden)]
     pub _marker: PhantomData<(N, C)>,
 }
 
 impl<N: 'static + Clone, C: Context, E: Expr<N, C>> Node<N, C, E> {
     pub fn alias(self, key: &'static str) -> CacheSaveStep<N, C, E> {
         CacheSaveStep { key, expr: self }
+    }
+}
+
+impl<N, C: Context, E> Node<N, C, E> {
+    /// Builds a node from a leaf supplied by the caller.
+    ///
+    /// `E` is the node's own shape, so a leaf of your own becomes a node here:
+    /// the leaf can carry a dependency key of its own, which a variable built
+    /// through [`Node::new`] cannot. This replaces writing out
+    /// `Node { expr: leaf, _marker: PhantomData }` by hand, which used to be the
+    /// only way to supply one. [`var_leaf!`](crate::var_leaf) generates such a
+    /// leaf for one attribute.
+    ///
+    /// No `E: Expr<N, C>` bound: the constructor only stores the leaf, and every
+    /// way of using the node — `eval`, the operators, `Display` — asks for that
+    /// bound itself.
+    #[inline(always)]
+    pub fn from_expr(expr: E) -> Self {
+        Self {
+            expr,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -133,7 +160,8 @@ impl<N: 'static, C: Context + 'static> Expr<N, C> for VarExpr<N, C> {
     /// `VarExpr<N, C>` itself, so every variable built through [`Node::new`] with
     /// the same value type and the same context shares a single key. A leaf that
     /// needs per-variable identity carries its own key instead, which is what a
-    /// custom `Expr` leaf does when it wraps `Node` as its `E` parameter.
+    /// custom `Expr` leaf does when it is the `E` parameter of `Node` — and
+    /// [`var_leaf!`](crate::var_leaf) generates such a leaf for one attribute.
     fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
         deps.insert(TypeId::of::<Self>());
     }
@@ -145,6 +173,100 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "var")
     }
+}
+
+/// Declares a zero-sized leaf for one attribute: a type implementing
+/// [`Expr`](crate::expr::Expr) whose dependency key is its own `TypeId` and whose
+/// [`Display`](std::fmt::Display) name is its own.
+///
+/// Read as: make a leaf called `$name`, whose value is a `$value`, read out of
+/// `$ctx`, by running the body of `|$bind| ..` against the context item. Hand the
+/// leaf to [`Node::from_expr`] to get a node.
+///
+/// Why a type per attribute rather than a closure: a variable built with
+/// [`Node::new`] reports the key of `VarExpr<N, C>`, so every variable of one
+/// value type and one context shares a single key and cannot be told apart. A
+/// leaf that reports `TypeId::of::<Self>()` gives the attribute its own key, and
+/// that is the only way to get per-attribute identity out of
+/// [`Expr::get_dependencies`](crate::expr::Expr::get_dependencies) without
+/// changing it.
+///
+/// The fetch body is compiled directly into `eval`, not stored as a closure or a
+/// function pointer. That is deliberate: the context item is a generic associated
+/// type (`C::ContextItem<'w, 's>`), and a `move |ctx| ..` closure cannot be
+/// higher-ranked over those two lifetimes, so a stored closure would not
+/// typecheck. `$bind` is bound to the incoming `&ContextItem`, so `|ctx| ctx.hp`
+/// reads exactly as it reads here. A body that ignores the binding should name it
+/// with a leading underscore (`|_ctx| ..`), as with any unused binding.
+///
+/// ```
+/// use express_it::prelude::*;
+/// use std::any::TypeId;
+/// use std::collections::HashSet;
+///
+/// struct Stats {
+///     hp: f32,
+///     attack: f32,
+/// }
+///
+/// struct GameCtx;
+///
+/// impl Context for GameCtx {
+///     type ContextItem<'w, 's> = Stats;
+/// }
+///
+/// var_leaf!(Health, f32, GameCtx, |ctx| ctx.hp);
+/// var_leaf!(Attack, f32, GameCtx, |ctx| ctx.attack);
+///
+/// fn keys<N, C: Context, E: Expr<N, C>>(node: &Node<N, C, E>) -> HashSet<TypeId> {
+///     let mut deps = HashSet::new();
+///     node.get_dependencies(&mut deps);
+///     deps
+/// }
+///
+/// let health = Node::<f32, GameCtx, _>::from_expr(Health);
+/// let attack = Node::<f32, GameCtx, _>::from_expr(Attack);
+/// let stats = Stats { hp: 60.0, attack: 24.0 };
+///
+/// assert_eq!(health.eval(&stats), 60.0);
+/// assert_eq!((health + attack).eval(&stats), 84.0);
+/// assert_eq!(health.to_string(), "Health", "and the leaf prints its own name");
+///
+/// // The point of the macro: two attributes, two keys.
+/// assert_ne!(keys(&health), keys(&attack));
+///
+/// // The same pair built through `Node::new` collapses to one key.
+/// let hp_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.hp);
+/// let atk_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.attack);
+/// assert_eq!(keys(&hp_var), keys(&atk_var));
+/// assert_eq!(keys(&hp_var).len(), 1);
+/// ```
+#[macro_export]
+macro_rules! var_leaf {
+    ($name:ident, $value:ty, $ctx:ty, |$bind:ident| $body:expr) => {
+        #[derive(Clone, Copy)]
+        pub struct $name;
+
+        impl $crate::expr::Expr<$value, $ctx> for $name {
+            // The body goes here rather than into a stored closure: the context
+            // item is a GAT, so the fetch cannot be a `for<'w, 's> fn(..)` value.
+            #[inline(always)]
+            fn eval(&self, ctx: &<$ctx as $crate::expr::Context>::ContextItem<'_, '_>) -> $value {
+                let $bind = ctx;
+                $body
+            }
+
+            fn get_dependencies(&self, deps: &mut ::std::collections::HashSet<::std::any::TypeId>) {
+                deps.insert(::std::any::TypeId::of::<Self>());
+            }
+        }
+
+        impl ::std::fmt::Display for $name {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                write!(f, stringify!($name))
+            }
+        }
+    };
 }
 
 impl<From: Num, To: Num, C: Context, E: Expr<From, C>> fmt::Display for CastNode<From, To, C, E>
@@ -406,5 +528,80 @@ mod tests {
         defense.get_dependencies(&mut deps);
 
         assert_eq!(deps.len(), 1, "both variables report the same VarExpr key");
+    }
+
+    /// A leaf written by hand, the way a consumer would write one: the shape
+    /// `from_expr` takes.
+    #[derive(Clone, Copy)]
+    struct Hp;
+
+    impl Expr<f32, Ctx> for Hp {
+        fn eval(&self, _ctx: &()) -> f32 {
+            7.5
+        }
+
+        fn get_dependencies(&self, deps: &mut HashSet<TypeId>) {
+            deps.insert(TypeId::of::<Self>());
+        }
+    }
+
+    impl fmt::Display for Hp {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "Hp")
+        }
+    }
+
+    #[test]
+    fn from_expr_builds_a_node_that_evaluates_composes_and_aliases() {
+        let hp = Node::<f32, Ctx, _>::from_expr(Hp);
+
+        assert_eq!(hp.eval(&()), 7.5, "the node evaluates through the leaf");
+        assert_eq!(hp.to_string(), "Hp", "and prints through it");
+
+        // Operators: `Node` operand on both sides, and a bare literal.
+        let doubled = (hp + hp) * 2.0;
+        assert_eq!(doubled.eval(&()), 30.0);
+
+        // `.alias(..)`: the cache-save step carries the same leaf, so the tree it
+        // saves is the tree that was built.
+        let step = hp.alias("hp");
+        assert_eq!(step.key, "hp");
+        assert_eq!(step.expr.eval(&()), 7.5);
+    }
+
+    // The same two leaves through the macro, so the generated impl is exercised
+    // in-crate as well as from the integration tests.
+    var_leaf!(ProbeAttack, f32, Ctx, |_ctx| 10.0f32);
+    var_leaf!(ProbeDefense, f32, Ctx, |_ctx| 2.0f32);
+
+    #[test]
+    fn var_leaf_leaves_have_their_own_key_while_node_new_variables_share_one() {
+        // The contrast the macro exists for.
+        let attack = Node::<f32, Ctx, _>::from_expr(ProbeAttack);
+        let defense = Node::<f32, Ctx, _>::from_expr(ProbeDefense);
+
+        assert_eq!(attack.eval(&()), 10.0);
+        assert_eq!(defense.eval(&()), 2.0);
+        assert_eq!(
+            (attack + defense).to_string(),
+            "(ProbeAttack + ProbeDefense)",
+            "Display comes from the leaf, so a tree of leaves reads by attribute"
+        );
+
+        let mut leaf_keys = HashSet::new();
+        attack.get_dependencies(&mut leaf_keys);
+        defense.get_dependencies(&mut leaf_keys);
+        assert_eq!(leaf_keys.len(), 2, "one key per leaf type");
+        assert!(leaf_keys.contains(&TypeId::of::<ProbeAttack>()));
+        assert!(leaf_keys.contains(&TypeId::of::<ProbeDefense>()));
+
+        let mut var_keys = HashSet::new();
+        Node::<f32, Ctx, _>::new(|()| 10.0f32).get_dependencies(&mut var_keys);
+        Node::<f32, Ctx, _>::new(|()| 2.0f32).get_dependencies(&mut var_keys);
+        assert_eq!(
+            var_keys.len(),
+            1,
+            "the pinned VarExpr behaviour is untouched by the macro"
+        );
     }
 }

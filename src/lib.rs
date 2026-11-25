@@ -54,7 +54,7 @@ pub mod prelude {
     pub use crate::plan::{
         AssignmentStep, CacheLookupStep, Plan, PlanCache, PlanError, StepExecutor,
     };
-    pub use crate::{all, any, load_cache, save, save_cache};
+    pub use crate::{all, any, load_cache, save, save_cache, var_leaf};
 }
 
 /// Test-only leaf with per-attribute identity, for the `get_dependencies` tests.
@@ -62,7 +62,8 @@ pub mod prelude {
 /// A variable built through `Node::new` reports the key of `VarExpr<N, C>`, so
 /// every variable of one value type and context shares a single key and cannot
 /// be told apart. A consumer that needs per-attribute identity supplies its own
-/// leaf as the `E` parameter of `Node`, so the forwarding tests do the same.
+/// leaf as the `E` parameter of `Node` through `Node::from_expr`, so the
+/// forwarding tests do the same.
 #[cfg(test)]
 pub(crate) mod dep_probe {
     use crate::expr::{Context, Expr};
@@ -121,10 +122,7 @@ pub(crate) mod dep_probe {
     }
 
     pub fn attr<A: Attribute>() -> Node<f32, ProbeCtx, Probe<A>> {
-        Node {
-            expr: Probe(PhantomData),
-            _marker: PhantomData,
-        }
+        Node::from_expr(Probe(PhantomData))
     }
 
     pub fn key<A: 'static>() -> TypeId {

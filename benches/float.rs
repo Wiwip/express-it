@@ -82,7 +82,8 @@ fn bench_binary(c: &mut Criterion) {
 }
 
 /// A leaf that reports a key of its own, the shape a consumer uses when its
-/// variables need per-attribute identity.
+/// variables need per-attribute identity — what `express_it::var_leaf!` generates,
+/// written out by hand.
 struct Leaf<K>(PhantomData<K>);
 
 impl<K: 'static> Clone for Leaf<K> {
@@ -108,10 +109,7 @@ struct Defense;
 struct Haste;
 
 fn leaf<K: 'static>() -> Node<f32, Ctx, Leaf<K>> {
-    Node {
-        expr: Leaf(PhantomData),
-        _marker: PhantomData,
-    }
+    Node::from_expr(Leaf(PhantomData))
 }
 
 fn bench_dependency_walk(c: &mut Criterion) {

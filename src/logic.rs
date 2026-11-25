@@ -284,7 +284,6 @@ mod tests {
     use crate::expr::{Context, Expr};
     use crate::logic::*;
     use crate::nodes::{Node, VarExpr};
-    use std::marker::PhantomData;
 
     // 1. Setup a Mock Context for the Engine to Evaluate Against
     pub struct MockEngine;
@@ -304,10 +303,7 @@ mod tests {
     fn var<N>(
         f: for<'a, 'w> fn(&'a &'w MockPlayerData) -> N,
     ) -> Node<N, MockEngine, VarExpr<N, MockEngine>> {
-        Node {
-            expr: VarExpr { fetch_fn: f },
-            _marker: PhantomData,
-        }
+        Node::from_expr(VarExpr { fetch_fn: f })
     }
 
     #[test]

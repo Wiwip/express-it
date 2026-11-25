@@ -21,12 +21,12 @@ express_it::ops     + - * / %, unary - and !, powf, min, max, abs, acos, sqrt, c
 express_it::logic   == != < <= > >=, not, and or xor nand nor nxor
 express_it::plan    Plan, PlanCache, PlanError, StepExecutor, AssignmentStep,
                     CacheLookupStep
-express_it          the five macros, each `#[macro_export]`ed, so this is their only
-                    home: all!, any!, save!, save_cache!, load_cache!
+express_it          the six macros, each `#[macro_export]`ed, so this is their only
+                    home: all!, any!, save!, save_cache!, load_cache!, var_leaf!
                     (`express_it::logic::all` and `express_it::plan::save` do not
                     resolve — E0432)
 express_it::prelude every trait whose method you call, every step type you have to
-                    name, and all five macros, in one glob — the two tree shapes are
+                    name, and all six macros, in one glob — the two tree shapes are
                     the deliberate exception
 ```
 
@@ -41,7 +41,9 @@ express-it = "0.2"
 
 `Node<N, C, E>` is the tree: `N` is the value type, `C` is your context (where
 variables read from), `E` is the node's own shape. You build trees through the
-constructors and operators and never name `E` yourself.
+three constructors — `Node::lit` for a constant, `Node::new` for a variable, and
+`Node::from_expr` for a leaf of your own — and the operators, and you never name
+`E` yourself.
 
 ```rust
 use express_it::prelude::*;
@@ -226,10 +228,55 @@ caller can register interest before the first evaluation. A variable built with
 variables of one value type and one context collapse to a single key. Two different
 variables are therefore indistinguishable to a dependency-driven invalidation layer.
 
-If you need per-attribute identity, write your own leaf: implement `Expr<N, C>` for
-your own type, insert your own key in `get_dependencies`, and use it as the `E`
-parameter of `Node`. Everything else in the crate forwards dependencies downward,
-so your keys arrive intact.
+Give each attribute its own leaf type and the keys separate. `var_leaf!` declares
+one — a zero-sized `Expr` implementor whose `get_dependencies` inserts its own
+`TypeId` and whose `Display` prints its own name — and `Node::from_expr` makes a node
+out of it. The fourth argument is the fetch, `|ctx| ..`, with `ctx` bound to your
+context item:
+
+```rust
+use express_it::prelude::*;
+use std::any::TypeId;
+use std::collections::HashSet;
+
+struct Stats {
+    health: f32,
+    attack: f32,
+}
+
+struct GameCtx;
+
+impl Context for GameCtx {
+    type ContextItem<'w, 's> = Stats;
+}
+
+var_leaf!(Health, f32, GameCtx, |ctx| ctx.health);
+var_leaf!(Attack, f32, GameCtx, |ctx| ctx.attack);
+
+fn keys<N, C: Context, E: Expr<N, C>>(node: &Node<N, C, E>) -> HashSet<TypeId> {
+    let mut deps = HashSet::new();
+    node.get_dependencies(&mut deps);
+    deps
+}
+
+let health = Node::<f32, GameCtx, _>::from_expr(Health);
+let attack = Node::<f32, GameCtx, _>::from_expr(Attack);
+
+// Two attributes, two keys, and the tree reads by attribute name.
+assert_ne!(keys(&health), keys(&attack));
+assert_eq!((health + attack).to_string(), "(Health + Attack)");
+
+// The same two attributes as `Node::new` variables: one key between them.
+let health_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.health);
+let attack_var = Node::<f32, GameCtx, _>::new(|ctx: &Stats| ctx.attack);
+assert_eq!(keys(&health_var), keys(&attack_var));
+```
+
+Writing the leaf by hand works just as well: implement `Expr<N, C>` for your own
+type, insert your own key in `get_dependencies`, and hand it to `Node::from_expr`.
+`var_leaf!` is that shape spelled shorter. Everything else in the crate forwards
+dependencies downward, so a leaf's keys arrive intact however deep it sits in the
+tree.
 
 ## Version history
 

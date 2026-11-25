@@ -114,7 +114,6 @@ impl_as_expression_for_primitives!(
 mod tests {
     use super::*;
     use crate::nodes::{LiteralNode, Node};
-    use std::marker::PhantomData;
 
     pub struct Ctx;
 
@@ -155,10 +154,7 @@ mod tests {
         // binary node: exactly the composition the exported `StoredExpr` alias
         // could not express before there was an `Expr` impl forwarding `Box`.
         let boxed: StoredExpr<f32, ProbeCtx> = Box::new(attr::<Attack>().expr);
-        let boxed_node: Node<f32, ProbeCtx, _> = Node {
-            expr: boxed,
-            _marker: PhantomData,
-        };
+        let boxed_node: Node<f32, ProbeCtx, _> = Node::from_expr(boxed);
 
         let tree = boxed_node + attr::<Defense>();
 

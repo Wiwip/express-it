@@ -19,7 +19,6 @@ use express_it::plan::Plan;
 use express_it::save;
 use std::any::TypeId;
 use std::collections::HashSet;
-use std::marker::PhantomData;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct State {
@@ -63,10 +62,7 @@ fn hp() -> Node<f32, Ctx, VarExpr<f32, Ctx>> {
 
 /// `Regen` behind the exported type-erasing alias.
 fn boxed_regen() -> Node<f32, Ctx, StoredExpr<f32, Ctx>> {
-    Node {
-        expr: Box::new(Regen),
-        _marker: PhantomData,
-    }
+    Node::from_expr(Box::new(Regen))
 }
 
 fn state() -> State {
