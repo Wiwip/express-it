@@ -36,7 +36,7 @@ express_it::prelude every trait whose method you call, every step type you have 
 
 ```toml
 [dependencies]
-express-it = "0.3"
+express-it = "0.4"
 ```
 
 ## Building an expression

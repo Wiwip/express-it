@@ -4,12 +4,15 @@ Behaviour changes that matter to a caller of `express-it`: what started working,
 stopped working, or changed meaning. The current API is documented in `README.md`
 and in `cargo doc --open`; this file only records what moved between releases.
 
-## Unreleased
+## 0.4.0 — 2026-11-27
 
-Work toward 0.4.0. Two entries under *Breaking* change what an existing program
-must write — cache keys are owned, and a named variable prints its name. Everything
-else here is additive, a CI guarantee, or the removal of a development-only
-dependency.
+Three things change what an existing program must write: rendering moved onto the
+`Expr` trait, cache keys are owned, and a named variable prints its name. The first
+is the one with consequences for a hand-written leaf, and the reason for the minor
+bump on its own. Everything else is additive — a fold that keeps deep accumulation
+off the stack, set algebra on `Deps`, accessors on `PlanCache` and `Plan`, a
+variable that captures, a macro for handle-shaped views — or is about the
+development environment: CI locking, and bevy gone from the dev-dependencies.
 
 ### Breaking
 
@@ -62,6 +65,26 @@ dependency.
   Anonymous `Node::new` variables still print `var`, and `var_leaf!` leaves still
   print their own type's `Display`, so only `Node::var` output moves. Anything that
   parses rendered trees has one string to fix.
+
+**Migrating from 0.3.** In the order the compiler reports them:
+
+1. `cargo build` fails with `E0046: not all trait items implemented, missing:
+   render` on each hand-written `impl Expr<..>`. Add the method — for a leaf,
+   `fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "MyLeaf") }`.
+   Leaves from `var_leaf!` and every node in the crate already have it.
+2. Printing a node *struct* directly (`CastNode`, `AddNode`, …) no longer compiles.
+   Print the `Node`: `Node::from_expr(cast_node).to_string()`.
+3. If your value type `N` is your own and has no `Display`, `Node::lit(value)` now
+   fails to resolve. Implement `Display` for it; a literal is printed, so the crate
+   will not build an expression it cannot render.
+4. A `CacheSaveStep { key, expr }` struct literal must hand over an owned key.
+   `CacheSaveStep::new(key, expr)`, `node.alias(key)` and `save_cache!(key, expr)`
+   all take `impl Into<String>`, so a `String` computed at run time works.
+5. If you assert on rendered trees, `var` becomes `var:<name>` for variables made
+   with `Node::var`. Nothing else in the rendering changes.
+
+Nothing in this list is a silent behaviour change: steps 1 to 4 are compile errors,
+and step 5 is the one string that moves at run time.
 
 ### Added
 
@@ -179,7 +202,32 @@ dev-dependencies is `criterion`'s 1.86 instead of 1.97.1.
 
 Library `missing_docs` warnings went from 149 to 144 across these commits:
 `PlanCache::set` had none, `AssignmentStep` and its three fields had none, and
-everything added here ships with its own documentation.
+everything added here ships with its own documentation. The lint is still not
+turned on: the 144 are overwhelmingly macro-generated node structs and operator
+traits, and switching it on would fail CI on the day it was enabled.
+
+### Verification
+
+`cargo test` on 0.4.0 runs 218 tests: 129 unit, 5 captured-variable, 11 fold, 7
+macro hygiene, 7 plan, 13 prelude, 19 property, 5 stored-expression, 19 doctests
+(2 ignored) and 3 `compile_fail` doctests. Every display assertion carried over
+from 0.3 unchanged, which is the evidence that moving rendering onto `Expr` did not
+change what a tree prints; the new fold tests add the erased-tree printings.
+
+On the commit tagged here, with rustc 1.99.1 and these flags all clean: `cargo
+test --locked --offline`, the same in `--release`, `cargo clippy --locked --offline
+--all-targets --all-features -- -D warnings`, `RUSTDOCFLAGS="-D warnings" cargo doc
+--locked --offline --no-deps --all-features`, `cargo fmt --all --check`, all four
+examples under `cargo run`, `cargo bench --locked --offline --no-run`, and
+`cargo package --offline`. A consumer crate on edition 2021 builds and runs against
+the crate as a path dependency.
+
+Two gates are CI-only and were not run here. `rust-version = "1.85"` is checked by
+a CI job that runs `cargo check --locked --lib` on 1.85.0; no 1.85 toolchain was
+available offline, so the declared minimum rests on that job alone. `cargo publish
+--dry-run` needs the registry index; CI runs it, and CI additionally greps
+`Cargo.toml` for the `license` field, because a missing license only *warns* during
+a dry run and exits 0.
 
 ## 0.3.0
 
