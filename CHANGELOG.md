@@ -6,9 +6,10 @@ and in `cargo doc --open`; this file only records what moved between releases.
 
 ## Unreleased
 
-Work toward 0.4.0. Nothing here changes what an existing program does: the API
-additions are additive, and the CI change alters only what the repository
-guarantees about its own dependency graph.
+Work toward 0.4.0. Two entries under *Breaking* change what an existing program
+must write — cache keys are owned, and a named variable prints its name. Everything
+else here is additive, a CI guarantee, or the removal of a development-only
+dependency.
 
 ### Breaking
 
@@ -70,6 +71,17 @@ guarantees about its own dependency graph.
   flag, so it is the one exception. A plain `cargo bench --no-run` had been
   rewriting `Cargo.lock` (blake3 1.8.7 to 1.8.8) while every check stayed green,
   which means CI could test a graph nobody had run locally.
+
+### Removed
+
+- The `bevy` dev-dependency, and with it the bevy-backed example. The library never
+depended on bevy; the example existed to show that an engine's entity reference
+fits `Context::ContextItem<'w, 's>`, two lifetimes and all. `examples/expr_demo.rs`
+now shows the same shape over a hand-written component store in about fifty lines,
+prints the same numbers, and adds the one case the engine version could not show
+without a second plugin: a view that refuses a component by name. A `cargo test` on
+a clone no longer builds an ECS, and the highest `rust-version` among the
+dev-dependencies is `criterion`'s 1.86 instead of 1.97.1.
 
 ### Corrected
 

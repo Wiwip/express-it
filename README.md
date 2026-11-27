@@ -386,17 +386,17 @@ current API and does not carry release notes.
 
 `rust-version = "1.85"` in `Cargo.toml` is what a *consumer* needs: the library's
 only dependency is `num-traits`, and dev-dependencies never enter a downstream
-build. Building these development targets needs more, because `criterion` declares
-1.86 and `bevy` declares 1.97.1 — `cargo build --lib` works on 1.85, while
-`cargo test` on a clone wants a current stable toolchain. CI splits the same way:
+build. Building these development targets needs a little more, because `criterion`
+declares 1.86 (`proptest` asks for 1.85 and fits) — `cargo build --lib` works on
+1.85, while `cargo bench` on a clone wants 1.86 or newer. CI splits the same way:
 a library-only check on 1.85, the full suite on stable.
 
 The examples in `examples/` and the criterion suites in `benches/` are development
 targets of this crate: they belong to a clone of the repository, not to depending
-on the crate, because they need its dev-dependencies (`bevy`, `criterion`). From a
-clone of the repository:
+on the crate, because they need its dev-dependencies (`criterion`, `proptest`).
+From a clone of the repository:
 ```sh
-cargo run --example expr_demo   # bevy-backed variables
+cargo run --example expr_demo   # variables over an entity store
 cargo run --example conditions
 cargo run --example display
 cargo run --example plan

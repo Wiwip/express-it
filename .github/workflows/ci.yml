@@ -93,12 +93,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # `rust-version` is a promise about a *consumer*'s toolchain, and a consumer
-      # resolves only `num-traits`. The dev targets are not part of that promise
-      # and cannot be built here at all: `criterion` declares 1.86 and `bevy`
-      # declares 1.97.1, and cargo hard-errors on a dependency whose `rust-version`
+      # resolves only `num-traits`. The dev targets are not part of that promise,
+      # and this job cannot build them all: `criterion` declares 1.86, and cargo
+      # hard-errors on a dependency whose `rust-version`
       # exceeds the active toolchain. So this job checks `--lib` and nothing else;
       # anything that also compiles tests, examples or benches would be red for a
-      # reason unrelated to whether the library supports 1.85.
+      # reason unrelated to whether the library supports 1.85. With bevy gone the
+      # job could in principle widen to `--tests --examples` — no test or example
+      # imports criterion — but that has not been run against a real 1.85 toolchain
+      # here, and a library-only check that is certainly correct beats a wider one
+      # that is merely believed.
       - name: Library checks out on the advertised rust-version
         run: cargo check --locked --lib --all-features
 
