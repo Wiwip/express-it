@@ -3,12 +3,14 @@ use num_traits::Num;
 use std::any::type_name;
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 /// An expression tree: a leaf `E` plus the value type `N` and context `C` it is
 /// read in.
 ///
-/// Build one with [`Node::lit`], [`Node::new`], [`Node::var`] or
-/// [`Node::from_expr`], then compose it with the operators and the method nodes.
+/// Build one with [`Node::lit`], [`Node::new`], [`Node::var`],
+/// [`Node::var_capture`] or [`Node::from_expr`], then compose it with the operators
+/// and the method nodes.
 ///
 /// Everything the crate does over a tree is recursive — `eval`, the dependency
 /// walk behind [`Node::dependencies`], `Display`, and `Drop` each descend one
@@ -418,6 +420,129 @@ impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
             Some(key) => write!(f, "var:{key}"),
             None => write!(f, "var"),
         }
+    }
+}
+
+/// The fetch function of a [`CapturedVar`]: a read that owns its environment.
+///
+/// Named because it appears in [`CapturedVar::from_arc`], and spelling it out at a
+/// call site is unpleasant: a `for<'w, 's>` binder over a generic associated type,
+/// inside a trait object.
+pub type CapturedFetch<N, C> =
+    Arc<dyn for<'w, 's> Fn(&<C as Context>::ContextItem<'w, 's>) -> N + Send + Sync>;
+
+/// A variable that captures its environment: the capturing twin of
+/// [`Node::var`].
+///
+/// `Node::var` takes a function *pointer*. A closure that captures nothing coerces
+/// to one, and a closure that captures something does not (`E0308: expected fn
+/// pointer, found closure`), which is the end of `|state| state.hp * boost` for a
+/// local `boost`. This payload holds a reference-counted trait object instead, so
+/// the capture is allowed:
+///
+/// ```
+/// use express_it::prelude::*;
+///
+/// #[derive(Clone, Copy)]
+/// struct Stats {
+///     hp: f32,
+/// }
+/// struct GameCtx;
+/// impl Context for GameCtx {
+///     type ContextItem<'w, 's> = Stats;
+/// }
+///
+/// let boost = 2.0; // the local that a function pointer could not have seen
+/// let scaled = Node::<f32, GameCtx, _>::var_capture("scaled", move |s: &Stats| s.hp * boost);
+///
+/// assert_eq!(scaled.eval(&Stats { hp: 10.0 }), 20.0);
+/// assert!(scaled.dependencies().contains_name("scaled"));
+/// ```
+///
+/// Three things come with the capture.
+///
+/// * **`Clone`, never `Copy`.** [`VarExpr`] is `Copy` because a function pointer is,
+///   and a node reports `Copy` when its payload does; so a plain variable can be
+///   handed to two trees, and this one cannot. Clone it — one pointer count — for a
+///   second tree, or read the same attribute through `Node::var` where no capture is
+///   needed.
+/// * **`C: 'static`.** A trait object has to own its types, which a `for<'w, 's>`
+///   bound over `C::ContextItem` does not give you for free. Reading through a
+///   borrowed context item is still exactly as before; it is the context *type* that
+///   must be `'static`.
+/// * **The context has to be written down.** `Node::<f32, GameCtx, _>::var_capture(…)`
+///   — a closure argument does not tell the compiler which `Context` a read view
+///   belongs to, and inference cannot work backwards through a generic associated
+///   type. Same friction [`Node::new`] already has.
+pub struct CapturedVar<N, C: Context> {
+    fetch_fn: CapturedFetch<N, C>,
+    key: &'static str,
+}
+
+impl<N, C: Context> CapturedVar<N, C> {
+    /// Wraps a fetch function that already lives behind an [`Arc`].
+    ///
+    /// The advanced path: for a closure, [`Node::var_capture`] does this wrapping and
+    /// hands back a node.
+    pub fn from_arc(name: &'static str, fetch_fn: CapturedFetch<N, C>) -> Self {
+        Self {
+            fetch_fn,
+            key: name,
+        }
+    }
+
+    /// The name this variable reports as its dependency key.
+    pub fn name(&self) -> &'static str {
+        self.key
+    }
+}
+
+// Written by hand rather than derived: `#[derive(Clone)]` would ask `N` and `C`
+// themselves to be `Clone`, which has nothing to do with copying a pointer.
+impl<N, C: Context> Clone for CapturedVar<N, C> {
+    fn clone(&self) -> Self {
+        Self {
+            fetch_fn: Arc::clone(&self.fetch_fn),
+            key: self.key,
+        }
+    }
+}
+
+impl<N: 'static, C: Context + 'static> Node<N, C, CapturedVar<N, C>> {
+    /// A variable whose read captures whatever the closure closes over.
+    ///
+    /// `name` is a dependency key, with the same three limits as [`Node::var`]: it
+    /// must be `'static`, it is compared by exact string equality, and it is global
+    /// to the crate rather than scoped to this value type or context.
+    #[inline(always)]
+    pub fn var_capture(
+        name: &'static str,
+        fetch_fn: impl for<'w, 's> Fn(&C::ContextItem<'w, 's>) -> N + Send + Sync + 'static,
+    ) -> Self {
+        Self::from_expr(CapturedVar {
+            fetch_fn: Arc::new(fetch_fn),
+            key: name,
+        })
+    }
+}
+
+impl<N: 'static, C: Context + 'static> Expr<N, C> for CapturedVar<N, C> {
+    #[inline(always)]
+    fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
+        (self.fetch_fn)(ctx)
+    }
+
+    /// Reports its own name, always: a captured variable is named at its
+    /// construction, so it never joins the single anonymous key [`Node::new`] shares.
+    fn get_dependencies(&self, deps: &mut Deps) {
+        deps.insert(DepKey::name(self.key));
+    }
+}
+
+impl<N, C: Context> fmt::Display for CapturedVar<N, C> {
+    /// `var:<name>`, matching [`VarExpr`] and [`DepKey`].
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "var:{}", self.key)
     }
 }
 

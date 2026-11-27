@@ -18,9 +18,10 @@ pub mod expr;
 /// back by `clone`, not by copy.
 pub mod logic;
 /// The tree itself: [`Node`](nodes::Node), the leaves it is built from
-/// ([`LiteralNode`](nodes::LiteralNode), [`VarExpr`](nodes::VarExpr)), the
-/// constructors (`lit`, `new`, `var`, `from_expr`), the `var_leaf!` macro, the
-/// `cast` conversions, and the cache-save step.
+/// ([`LiteralNode`](nodes::LiteralNode), [`VarExpr`](nodes::VarExpr),
+/// [`CapturedVar`](nodes::CapturedVar)), the constructors (`lit`, `new`, `var`,
+/// `var_capture`, `from_expr`), the `var_leaf!` macro, the `cast` conversions, and
+/// the cache-save step.
 pub mod nodes;
 /// Arithmetic: the `+ - * / %` binary operator impls on `Node` — for `+ - * /` a
 /// primitive may sit on the left, while `%` needs a `Node` on the left — the
@@ -86,7 +87,7 @@ pub mod prelude {
         ExprLogicalAnd, ExprLogicalNand, ExprLogicalNor, ExprLogicalNxor, ExprLogicalOr,
         ExprLogicalXor,
     };
-    pub use crate::nodes::{AsCast, CacheSaveStep, Node, Var, VarExpr};
+    pub use crate::nodes::{AsCast, CacheSaveStep, CapturedFetch, CapturedVar, Node, Var, VarExpr};
     pub use crate::ops::{ExprAbs, ExprAcos, ExprClamp, ExprMax, ExprMin, ExprPow, ExprSqrt};
     pub use crate::plan::{
         AssignmentStep, CacheLookupStep, Plan, PlanCache, PlanError, StepExecutor,

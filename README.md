@@ -40,10 +40,11 @@ express-it = "0.3"
 ## Building an expression
 
 `Node<N, C, E>` is the tree: `N` is the value type, `C` is your context (where
-variables read from), `E` is the node's own shape. You build trees through the four
+variables read from), `E` is the node's own shape. You build trees through the five
 constructors — `Node::lit` for a constant, `Node::new` for a variable, `Node::var`
-for a variable that is its own dependency key, and `Node::from_expr` for a leaf of
-your own — and the operators, and you never name `E` yourself.
+for a variable that is its own dependency key, `Node::var_capture` for one whose
+fetch closes over a local, and `Node::from_expr` for a leaf of your own — and the
+operators, and you never name `E` yourself.
 
 ```rust
 use express_it::prelude::*;
@@ -368,6 +369,24 @@ Choose by what the identity is: a name via `Node::var` when the attribute is wha
 you want to key on and nothing else, a type via `var_leaf!` when the leaf itself is
 worth having — a `Display` name for the tree, a fetch compiled into `eval`, a leaf
 several nodes share.
+
+`Node::var` and `Node::new` take a function *pointer*, so a fetch cannot close over
+anything: `|ctx| ctx.health * 2.0` compiles, and the same body with a captured local
+is `E0308`. `Node::var_capture` takes a closure for exactly that case:
+
+```rust
+# use express_it::prelude::*;
+# struct Stats { health: f32 }
+# struct GameCtx;
+# impl Context for GameCtx { type ContextItem<'w, 's> = Stats; }
+let boost = 2.0f32;
+let shield = Node::<f32, GameCtx, _>::var_capture("shield", move |ctx: &Stats| ctx.health * boost);
+assert_eq!(shield.eval(&Stats { health: 10.0 }), 20.0);
+```
+
+It costs `Copy`: a captured variable is reference-counted, so it goes into one tree
+and is cloned for the next, where a `Node::var` variable is copied freely. Use
+`Node::var` when there is nothing to capture.
 
 Writing the leaf by hand works just as well: implement `Expr<N, C>` for your own
 type, insert `DepKey::type_of::<Self>()` in `get_dependencies`, and hand it to

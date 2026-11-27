@@ -50,6 +50,20 @@ dependency.
   drop one, or invalidate the lot.
 - `Plan` grew `len` and `is_empty`, counting a tuple of steps as the single step it
   is.
+- `Node::var_capture`, and the payload type behind it, `CapturedVar` (with its fetch
+  type, `CapturedFetch`, since that appears in a public signature): a variable
+  whose read closes over an environment. `Node::var` takes a function pointer, so
+  `|state| state.hp * boost` for a local `boost` is `E0308: expected fn pointer,
+  found closure`; this takes an `impl Fn(&C::ContextItem<'w, 's>) -> N + Send + Sync`
+  and keys the variable by name exactly as `var` does, so it prints `var:<name>` and
+  answers `contains_name`. It costs `Copy` — the payload is `Arc`-backed, `Clone` and
+  never `Copy`, so one variable feeds one tree and is cloned for the next — it needs
+  `C: 'static`, and it needs the context written down at the leaf
+  (`Node::<f32, Ctx, _>::var_capture(…)`), because inference cannot work backwards
+  through a generic associated type. `Node::var` is untouched: function pointers,
+  `Copy`, and the inference it always had. This is additive on purpose; changing
+  `var` itself would have taken `Copy` away from every variable in existence to buy
+  the same capability for the ones that need a capture.
 - `[package.metadata.docs.rs]` with `all-features = true`, so docs.rs builds what a
   consumer reads. The crate declares no features today, so this changes nothing
   about what gets built.
