@@ -17,6 +17,8 @@ a per-run typed cache, or both. Steps run in order, so step *N* sees what step
 express_it::expr    Context / ContextMut, Expr, AsExpression, StoredExpr, DepKey, Deps
 express_it::nodes   Node, Var, VarExpr, CacheSaveStep; LiteralNode and CastNode,
                     the tree shapes, live here and only here — see the last line
+express_it::fold    Node::sum / Node::product, FoldNode: a Vec of children folded
+                    in a loop, so a long list stays one node deep
 express_it::ops     + - * / %, unary - and !, powf, min, max, abs, acos, sqrt, clamp
 express_it::logic   == != < <= > >=, not, and or xor nand nor nxor
 express_it::plan    Plan, PlanCache, PlanError, StepExecutor, AssignmentStep,
@@ -389,11 +391,60 @@ and is cloned for the next, where a `Node::var` variable is copied freely. Use
 `Node::var` when there is nothing to capture.
 
 Writing the leaf by hand works just as well: implement `Expr<N, C>` for your own
-type, insert `DepKey::type_of::<Self>()` in `get_dependencies`, and hand it to
-`Node::from_expr` — the `Expr` trait doc (`express_it::expr::Expr`) shows that impl
+type — three methods, `eval`, `get_dependencies` (insert
+`DepKey::type_of::<Self>()`) and `render` (write the leaf's name) — and hand it to
+`Node::from_expr`; the `Expr` trait doc (`express_it::expr::Expr`) shows that impl
 in full. `var_leaf!` is that shape spelled shorter. Everything else in the crate
 forwards dependencies downward, so a leaf's keys arrive intact however deep it sits
 in the tree.
+
+## Folding a list into one expression
+
+Turning rows of data into one expression is the one place where a tree can grow
+taller than you meant. A loop cannot grow a `Node`'s *type* each iteration, so the
+only way to accumulate is to erase each step into `StoredExpr`, and that builds a
+chain: one `eval` frame per row, which measured 20,000 levels to overflow a 1 MiB
+stack and 100,000 to overflow an 8 MiB one — an abort, not an error.
+
+`Node::sum` and `Node::product` take the children as a `Vec` and fold them in a
+loop instead, so a thousand rows or a hundred thousand cost one node's stack:
+
+```rust
+use express_it::expr::StoredExpr;
+use express_it::prelude::*;
+
+#[derive(Clone, Copy, Debug, Default)]
+struct CtxState {
+    weight: f32,
+}
+
+struct Ctx;
+
+impl Context for Ctx {
+    type ContextItem<'w, 's> = CtxState;
+}
+
+var_leaf!(Weight, f32, Ctx, |state| state.weight);
+
+let rows = [1.5f32, 2.0, 3.25];
+let terms: Vec<StoredExpr<f32, Ctx>> = rows
+    .iter()
+    .map(|w| Box::new(Node::lit(*w) * Node::from_expr(Weight)) as StoredExpr<f32, Ctx>)
+    .collect();
+
+let total = Node::sum(terms);
+assert_eq!(total.eval(&CtxState { weight: 2.0 }), 13.5);
+assert_eq!(
+    total.to_string(),
+    "((1.5 * Weight) + (2 * Weight) + (3.25 * Weight))"
+);
+```
+
+A `Vec` holds one type, so mixing leaf types means erasing them into `StoredExpr`,
+as above — which costs `Clone`, the same cost any erased tree pays. Children of a
+single node type skip the boxing and keep it. No fold is `Copy` either: a `Vec` is
+in the way, so composing one moves it. An empty fold is the identity, `0` for a sum
+and `1` for a product, and prints as such.
 
 ## Version history
 

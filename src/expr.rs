@@ -616,7 +616,13 @@ pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
 /// used to require its payload to be `Display`, which a trait object can never be,
 /// and the payload structs' own `Display` impls are gone in favour of `render`.)
 ///
-/// The third thing to know is depth. `eval`, the dependency walk and the drop of a
+/// The third thing to know is depth, and the fourth is what to do about it:
+/// [`Node::sum`](crate::nodes::Node::sum) and
+/// [`Node::product`](crate::nodes::Node::product) take a `Vec` of erased children
+/// and fold them in a loop, so a list of any length stays one node deep. Build the
+/// chain only when you truly need a binary tree.
+///
+/// The reason a fold matters is that `eval`, the dependency walk and the drop of a
 /// tree are all recursive, so a boxed chain costs stack per level and a deep enough
 /// one takes the process down with a stack overflow — an abort, not a `PlanError`
 /// you could match. Measured on this toolchain (rustc 1.99.1, release profile,
@@ -627,6 +633,13 @@ pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
 /// be, and a host that runs work on task threads (1 to 2 MiB stacks) reaches the
 /// limit sooner than the main thread does. The crate's own depth test sits at
 /// 4,000 for that reason.
+///
+/// Dropping is the recursive part people forget: a chain that evaluated fine can
+/// still overflow when it goes out of scope. It cannot be made iterative here —
+/// `impl Drop for Node<N, C, StoredExpr<N, C>>` is rejected outright with
+/// `E0366: Drop impls cannot be specialized`, since `Node` derives `Copy` for other
+/// payloads — so the guidance is the same from both directions: fold into a `Vec`,
+/// do not chain.
 pub type StoredExpr<N, C> = Box<dyn Expr<N, C> + Send + Sync>;
 
 // Forwards through `Box` so the alias above composes into a tree: without it a

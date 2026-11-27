@@ -65,6 +65,32 @@ dependency.
 
 ### Added
 
+- **`Node::sum` and `Node::product`: flat n-ary folds** (`express_it::fold`, with
+  `FoldNode`, `Sum`, `Product`; all three in the prelude). They take a `Vec` of
+  children and reduce it in a loop, which is how a list of records becomes one
+  expression without building a chain:
+
+  ```rust
+  let terms: Vec<StoredExpr<f32, Ctx>> = rows
+      .iter()
+      .map(|r| Box::new(weight(r) * r.bonus) as StoredExpr<f32, Ctx>)
+      .collect();
+  let total = Node::sum(terms); // one node deep, whatever `rows` holds
+  ```
+
+  Evaluation, the dependency walk, printing and drop all loop, so the stack cost
+  does not grow with the row count: 100,000 children evaluate on a 256 KiB stack,
+  where the erased chain of the same size aborts the process. Folds are exact
+  against the nested form (the seed is `0` or `1`, and `0 + a` is exact); an empty
+  fold is the identity and prints `0` or `1`; children of one node type keep the
+  fold `Clone`, while mixed leaf types need `StoredExpr` children — a `Vec` holds
+  one type — and give `Clone` up as every erased tree does. No fold is `Copy`,
+  because a `Vec` is in the way, so composing one moves it.
+
+  Making the drop of an *existing* chain iterative was attempted and is impossible:
+  `impl Drop for Node<N, C, StoredExpr<N, C>>` is rejected with
+  `E0366: Drop impls cannot be specialized`, since `Node` derives `Copy` for other
+  payloads. Documented on `StoredExpr`.
 - `Deps` grew the set algebra a dependency watcher needs — `intersect_with`,
   `difference_with`, `is_subset_of` — plus `names()`, `types()` and
   `to_sorted_vec()`, which sorts rather than exposing hash order. `iter` still

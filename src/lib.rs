@@ -8,6 +8,14 @@
 /// [`Deps`](expr::Deps)/[`DepKey`](expr::DepKey) are the sink a node reports its
 /// dependencies into.
 pub mod expr;
+/// Flat n-ary reductions: [`Node::sum`](nodes::Node::sum) and
+/// [`Node::product`](nodes::Node::product) fold a `Vec` of children in a loop.
+///
+/// These exist because of stack depth. Accumulating a tree in a loop means erasing
+/// each step, and an erased chain costs one `eval` frame per element — measured at
+/// 20,000 levels overflowing a 1 MiB stack, with an abort rather than an error.
+/// Accumulate the children into a vector instead and the depth stays at one node.
+pub mod fold;
 /// Comparison and boolean structure: the `.lt()`/`.le()`/`.gt()`/`.ge()`/`.eq()`
 /// nodes, the `.and()`/`.or()`/`.not()` … combinators, and the `any!`/`all!`
 /// macros.
@@ -82,6 +90,7 @@ pub mod prelude {
     pub use crate::expr::{
         AsExpression, BoolExpr, Context, ContextMut, DepKey, Deps, Expr, StoredExpr,
     };
+    pub use crate::fold::{FoldNode, Product, Sum};
     pub use crate::logic::{
         ExprCmpEq, ExprCmpGe, ExprCmpGt, ExprCmpLe, ExprCmpLt, ExprCmpNotEq, ExprLogicNot,
         ExprLogicalAnd, ExprLogicalNand, ExprLogicalNor, ExprLogicalNxor, ExprLogicalOr,
