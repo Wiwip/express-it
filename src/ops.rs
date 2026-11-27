@@ -26,11 +26,13 @@ macro_rules! impl_binary_op {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
-        }
 
-        impl<L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<L, R> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "({} {} {})", self.lhs, stringify!($op), self.rhs)
+            fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "(")?;
+                self.lhs.render(f)?;
+                write!(f, " {} ", stringify!($op))?;
+                self.rhs.render(f)?;
+                write!(f, ")")
             }
         }
 
@@ -135,11 +137,11 @@ macro_rules! impl_unary_op {
             fn get_dependencies(&self, deps: &mut Deps) {
                 self.expr.get_dependencies(deps);
             }
-        }
 
-        impl<E: fmt::Display> fmt::Display for $node_name<E> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "({}{})", stringify!($op), self.expr)
+            fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "({}", stringify!($op))?;
+                self.expr.render(f)?;
+                write!(f, ")")
             }
         }
 
@@ -186,17 +188,13 @@ macro_rules! impl_binary_method {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
-        }
 
-        impl<L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<L, R> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(
-                    f,
-                    "{}({}, {})",
-                    stringify!($method_name),
-                    self.lhs,
-                    self.rhs
-                )
+            fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}(", stringify!($method_name))?;
+                self.lhs.render(f)?;
+                write!(f, ", ")?;
+                self.rhs.render(f)?;
+                write!(f, ")")
             }
         }
 
@@ -266,11 +264,11 @@ macro_rules! impl_unary_method {
             fn get_dependencies(&self, deps: &mut Deps) {
                 self.expr.get_dependencies(deps);
             }
-        }
 
-        impl<E: fmt::Display> fmt::Display for $node_name<E> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}({})", stringify!($method_name), self.expr)
+            fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}(", stringify!($method_name))?;
+                self.expr.render(f)?;
+                write!(f, ")")
             }
         }
 
@@ -327,20 +325,15 @@ macro_rules! impl_trinary_method {
                 self.arg1.get_dependencies(deps);
                 self.arg2.get_dependencies(deps);
             }
-        }
 
-        impl<E: fmt::Display, A: fmt::Display, B: fmt::Display> fmt::Display
-            for $node_name<E, A, B>
-        {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(
-                    f,
-                    "{}({}, {}, {})",
-                    stringify!($method_name),
-                    self.expr,
-                    self.arg1,
-                    self.arg2
-                )
+            fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}(", stringify!($method_name))?;
+                self.expr.render(f)?;
+                write!(f, ", ")?;
+                self.arg1.render(f)?;
+                write!(f, ", ")?;
+                self.arg2.render(f)?;
+                write!(f, ")")
             }
         }
 
@@ -747,9 +740,9 @@ mod tests {
     }
 
     /// Wraps a node's payload in the crate's own type-erasing box, so a tree can be
-    /// deepened in a loop rather than in the type system. Evaluation and dependency
-    /// keys forward through the box; display does not, because `Box<dyn Expr>` is
-    /// not `Display` and `impl Display for Node` asks its payload to be.
+    /// deepened in a loop rather than in the type system. Evaluation, dependency
+    /// keys and rendering all forward through the box, so a tree built in a loop
+    /// still prints.
     fn erase<N, E: Expr<N, Ctx> + Send + Sync + 'static>(
         node: Node<N, Ctx, E>,
     ) -> Node<N, Ctx, StoredExpr<N, Ctx>> {

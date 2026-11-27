@@ -13,6 +13,34 @@ dependency.
 
 ### Breaking
 
+- **Rendering moved onto `Expr`.** Every expression now implements a third method,
+  `Expr::render(&self, f)`, and `Display for Node` forwards to it after a bound
+  change: the impl asked for `E: Display` on the payload, and now asks for
+  `E: Expr<N, C>`. A trait object cannot be `Display`, which is precisely why a tree
+  built with `StoredExpr` used to evaluate, report its keys and then refuse to print.
+  `render` travels on the same vtable as `eval`, so it prints.
+  ```text
+  (Regen + var)                       ← a boxed leaf inside a printed tree
+  clamp((Regen + var), 0, 10)
+  ((Regen > var) && (Regen <= Regen))
+  ```
+  Three consequences, and the text of every tree that printed before is unchanged —
+  all 205 tests pass with their display assertions untouched.
+
+  1. **A hand-written `impl Expr` must add `render`.** `E0046: not all trait items
+     implemented, missing: render`. For a leaf this is one line, `write!(f, "MyLeaf")`;
+     `var_leaf!` writes it, and so does every node in the crate. It is a required
+     method rather than a defaulted one on purpose: a default that printed the Rust
+     type name would silently change what a hand-written leaf prints, and silent
+     output drift is the thing this crate has been bitten by.
+  2. **The node structs lost their own `Display` impls** (`AddNode`, `GreaterThanNode`,
+     `ClampNode`, `CastNode`, `LiteralNode`, …). Printing one directly no longer
+     compiles; print the `Node` holding it. Those impls could not survive the change
+     anyway — a node prints its children, and a child is now known only as an `Expr`.
+  3. **`LiteralNode`'s `Expr` impl now requires `N: fmt::Display`.** A literal is the
+     one node that has to print a *value*, and the bound sits there rather than on the
+     trait, so no other node and no composite sees it. What it costs: `Node::lit` of a
+     value type with no `Display` is no longer an expression at all.
 - Cache keys are owned on both sides. `CacheSaveStep.key` is a `String` where it
   was a `&'static str`, and `Node::alias` and `save_cache!` take any
   `Into<String>`, which is what `load_cache!`, `PlanCache::set` and `save!`'s
@@ -50,6 +78,9 @@ dependency.
   drop one, or invalidate the lot.
 - `Plan` grew `len` and `is_empty`, counting a tuple of steps as the single step it
   is.
+- **Erased subtrees print.** `Node::from_expr(Box::new(..))` used to be a tree that
+  would not render; it now prints in full at any nesting depth, in arithmetic,
+  method, comparison and boolean positions alike. Pinned in `tests/stored_expr.rs`.
 - `Node::var_capture`, and the payload type behind it, `CapturedVar` (with its fetch
   type, `CapturedFetch`, since that appears in a public signature): a variable
   whose read closes over an environment. `Node::var` takes a function pointer, so
@@ -298,7 +329,8 @@ release — they are documented, and each has a note at the item that raises it.
 * **A boxed sub-expression cannot be displayed.** `Display` for `Node` asks its
   payload to be `Display`, and `Box<dyn Expr>` is not, so a tree deepened through
   `erase()` evaluates and reports dependencies but will not print. Documented on
-  both the helper and `StoredExpr`.
+  both the helper and `StoredExpr`. *Closed in 0.4:* rendering moved onto `Expr`
+  itself, so an erased subtree prints — see the 0.4 *Added* entry.
 
 The crate also does not yet enforce its own documentation: `RUSTFLAGS="-W
 missing_docs" cargo check` reports 149 warnings, down from 167 in this cycle, and

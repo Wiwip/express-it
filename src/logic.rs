@@ -16,11 +16,11 @@ impl<C: Context, E: Expr<bool, C>> Expr<bool, C> for LogicalNotNode<E> {
     fn get_dependencies(&self, deps: &mut Deps) {
         self.inner.get_dependencies(deps);
     }
-}
 
-impl<E: fmt::Display> fmt::Display for LogicalNotNode<E> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(not {})", self.inner)
+    fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(not ")?;
+        self.inner.render(f)?;
+        write!(f, ")")
     }
 }
 
@@ -80,11 +80,13 @@ macro_rules! impl_cmp_method {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
-        }
 
-        impl<N: fmt::Display, L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<N, L, R> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "({} {} {})", self.lhs, stringify!($operator), self.rhs)
+            fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "(")?;
+                self.lhs.render(f)?;
+                write!(f, " {} ", stringify!($operator))?;
+                self.rhs.render(f)?;
+                write!(f, ")")
             }
         }
 
@@ -139,11 +141,13 @@ macro_rules! impl_logical_method {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
-        }
 
-        impl<L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<L, R> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "({} {} {})", self.lhs, stringify!($operator), self.rhs)
+            fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "(")?;
+                self.lhs.render(f)?;
+                write!(f, " {} ", stringify!($operator))?;
+                self.rhs.render(f)?;
+                write!(f, ")")
             }
         }
 
@@ -198,11 +202,13 @@ macro_rules! impl_neg_logical_method {
                 self.lhs.get_dependencies(deps);
                 self.rhs.get_dependencies(deps);
             }
-        }
 
-        impl<L: fmt::Display, R: fmt::Display> fmt::Display for $node_name<L, R> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "!({} {} {})", self.lhs, stringify!($operator), self.rhs)
+            fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "!(")?;
+                self.lhs.render(f)?;
+                write!(f, " {} ", stringify!($operator))?;
+                self.rhs.render(f)?;
+                write!(f, ")")
             }
         }
 
@@ -272,6 +278,10 @@ impl<C: Context> Expr<bool, C> for bool {
     #[inline(always)]
     fn eval(&self, _ctx: &C::ContextItem<'_, '_>) -> bool {
         *self
+    }
+
+    fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self}")
     }
 }
 

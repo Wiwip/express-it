@@ -177,9 +177,10 @@ pub trait ContextMut: Context {
 ///
 /// `N` is the value type, `C` the context a variable reads from. Every node in
 /// the crate implements it, and a leaf of your own implements it too — that is
-/// the whole contract a custom leaf has to satisfy, and it is two methods:
-/// `eval`, and [`get_dependencies`](Expr::get_dependencies) reporting the keys of
-/// the leaves below this node into a [`Deps`] sink.
+/// the whole contract a custom leaf has to satisfy, and it is three methods:
+/// `eval`, [`get_dependencies`](Expr::get_dependencies) reporting the keys of the
+/// leaves below this node into a [`Deps`] sink, and
+/// [`render`](Expr::render) writing the node the way the tree prints.
 ///
 /// A leaf that wants its own key reports one; a node that merely holds other
 /// expressions forwards the walk to its children. `var_leaf!` writes both halves
@@ -223,6 +224,10 @@ pub trait ContextMut: Context {
 ///
 ///     fn get_dependencies(&self, deps: &mut Deps) {
 ///         deps.insert(DepKey::type_of::<Self>());
+///     }
+///
+///     fn render(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         write!(f, "Hp")
 ///     }
 /// }
 ///
@@ -281,6 +286,24 @@ pub trait Expr<N, C: Context> {
     /// sink and calls this; implementing it is for a leaf of your own, and the
     /// [`Expr`] doc shows that impl.
     fn get_dependencies(&self, _deps: &mut Deps) {}
+
+    /// Writes this expression in fixity form — the way the tree prints.
+    ///
+    /// Each node writes its own shape: `(child op child)` for the operators, the
+    /// value for a literal, `var:<name>` for a named variable, and for a leaf of
+    /// your own whatever identifies it — the leaf's own name is the fair answer, and
+    /// is what [`var_leaf!`](crate::var_leaf) writes for you.
+    ///
+    /// This lives on the trait rather than on a `Display` impl per payload struct so
+    /// that printing survives type erasure. A sub-expression behind a [`StoredExpr`]
+    /// has no static type for `Display` to sit on, but its `render` travels on the
+    /// same vtable as `eval`, so an erased subtree prints as part of a bigger tree.
+    /// That is also why a composite writes its children by calling *their* `render`
+    /// instead of formatting them: it can then hold a child it knows nothing about.
+    ///
+    /// [`Node`]'s own `Display` forwards here, so
+    /// `format!("{tree}")` is this method.
+    fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
 }
 
 /// One leaf's identity, as reported through [`Expr::get_dependencies`].
@@ -586,9 +609,12 @@ pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
 /// handed to two trees, and a tree that erases its children is neither `Copy` nor
 /// `Clone` until it is rebuilt around a shared pointer.
 ///
-/// The box brings a second limitation: it is not `Display`, and `impl Display for
-/// Node` asks its payload to be, so a tree deepened by boxing a sub-expression
-/// evaluates and reports its dependency keys but cannot be printed.
+/// Printing survives erasure. `Expr::render` travels on the same vtable as `eval`,
+/// and `Node`'s `Display` forwards to it, so a tree deepened by boxing a
+/// sub-expression prints in full — `(var:hp + (var:hp * 2))` and not a
+/// "cannot be printed" note. (This is what changed in 0.4: `impl Display for Node`
+/// used to require its payload to be `Display`, which a trait object can never be,
+/// and the payload structs' own `Display` impls are gone in favour of `render`.)
 ///
 /// The third thing to know is depth. `eval`, the dependency walk and the drop of a
 /// tree are all recursive, so a boxed chain costs stack per level and a deep enough
@@ -615,6 +641,11 @@ impl<N, C: Context, E: Expr<N, C> + ?Sized> Expr<N, C> for Box<E> {
     #[inline(always)]
     fn get_dependencies(&self, deps: &mut Deps) {
         (**self).get_dependencies(deps);
+    }
+
+    #[inline(always)]
+    fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        (**self).render(f)
     }
 }
 

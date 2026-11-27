@@ -146,6 +146,11 @@ where
     fn get_dependencies(&self, deps: &mut Deps) {
         self.expr.get_dependencies(deps);
     }
+
+    #[inline(always)]
+    fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.expr.render(f)
+    }
 }
 
 impl<N, C: Context, E: Expr<N, C>> Node<N, C, E> {
@@ -192,9 +197,13 @@ impl<N, C: Context, E: Expr<N, C>> Node<N, C, E> {
     }
 }
 
-impl<N: fmt::Display, C: Context, E: Expr<N, C> + fmt::Display> fmt::Display for Node<N, C, E> {
+impl<N, C: Context, E: Expr<N, C>> fmt::Display for Node<N, C, E> {
+    /// Forwards to [`Expr::render`] on the payload, which is what every node in the
+    /// crate implements. The bound used to be `E: fmt::Display`, which a type-erased
+    /// sub-expression can never satisfy; forwarding through the trait is why a tree
+    /// built with [`StoredExpr`](crate::expr::StoredExpr) prints now.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.expr)
+        self.expr.render(f)
     }
 }
 
@@ -408,20 +417,18 @@ impl<N: 'static, C: Context + 'static> Expr<N, C> for VarExpr<N, C> {
         };
         deps.insert(key);
     }
-}
 
-impl<N, C: Context> Copy for VarExpr<N, C> {}
-
-impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
     /// A named variable prints `var:<name>`, the same rendering [`DepKey`] gives a
     /// name key; an anonymous [`Node::new`] variable has no name and prints `var`.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.key {
             Some(key) => write!(f, "var:{key}"),
             None => write!(f, "var"),
         }
     }
 }
+
+impl<N, C: Context> Copy for VarExpr<N, C> {}
 
 /// The fetch function of a [`CapturedVar`]: a read that owns its environment.
 ///
@@ -537,11 +544,9 @@ impl<N: 'static, C: Context + 'static> Expr<N, C> for CapturedVar<N, C> {
     fn get_dependencies(&self, deps: &mut Deps) {
         deps.insert(DepKey::name(self.key));
     }
-}
 
-impl<N, C: Context> fmt::Display for CapturedVar<N, C> {
     /// `var:<name>`, matching [`VarExpr`] and [`DepKey`].
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "var:{}", self.key)
     }
 }
@@ -749,6 +754,13 @@ macro_rules! var_leaf {
             fn get_dependencies(&self, deps: &mut $crate::expr::Deps) {
                 deps.insert($crate::expr::DepKey::type_of::<Self>());
             }
+
+            fn render(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                // Same text as the `Display` below, written here so the leaf prints
+                // from inside a bigger tree even when the tree reaches it through a
+                // type-erased sub-expression.
+                write!(f, stringify!($name))
+            }
         }
 
         impl ::std::fmt::Display for $name {
@@ -759,32 +771,24 @@ macro_rules! var_leaf {
     };
 }
 
-impl<From: Num, To: Num, C: Context, E: Expr<From, C>> fmt::Display for CastNode<From, To, C, E>
-where
-    From: fmt::Display,
-    E: fmt::Display,
-{
-    // `type_name` needs no bound on `To` (it is `fn type_name<T: ?Sized>()`), so
-    // the target type is printed without widening this impl.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "cast::<{}>({})", type_name::<To>(), self.inner)
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct LiteralNode<N> {
     pub value: N,
 }
 
-impl<N: Copy, C: Context> Expr<N, C> for LiteralNode<N> {
+// `N: fmt::Display` is here rather than on the trait, and that is the whole
+// placement: printing a tree means printing its literals, and only *this* node holds
+// a value it must print. A composite renders its children through `Expr::render` and
+// never needs to know their value type, so the bound stays off the trait and off
+// every other node. What it costs is that `Node::lit` of a value type with no
+// `Display` is no longer an expression at all.
+impl<N: Copy + fmt::Display, C: Context> Expr<N, C> for LiteralNode<N> {
     #[inline(always)]
     fn eval(&self, _ctx: &C::ContextItem<'_, '_>) -> N {
         self.value
     }
-}
 
-impl<N: fmt::Display> fmt::Display for LiteralNode<N> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.value)
     }
 }
@@ -887,6 +891,14 @@ where
     fn get_dependencies(&self, deps: &mut Deps) {
         self.inner.get_dependencies(deps);
     }
+
+    // `type_name` needs no bound on `To` (it is `fn type_name<T: ?Sized>()`), so the
+    // target type is printed without widening this impl.
+    fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "cast::<{}>(", type_name::<To>())?;
+        self.inner.render(f)?;
+        write!(f, ")")
+    }
 }
 
 impl<From: Num, To: Num, C: Context, E: Expr<From, C> + Clone> Clone for CastNode<From, To, C, E> {
@@ -963,7 +975,11 @@ mod tests {
         assert_eq!(copied.eval(&()), 3.0f32);
         // Bits, so the comparison holds for a cast whose result is NaN.
         assert_eq!(node.eval(&()).to_bits(), copied.eval(&()).to_bits());
-        assert_eq!(node.to_string(), copied.to_string());
+        // A `CastNode` on its own no longer prints — the payload structs lost their
+        // `Display` impls when rendering moved onto `Expr`. It prints as a node.
+        let shown = Node::<f32, Ctx, _>::from_expr(node);
+        let shown_again = Node::<f32, Ctx, _>::from_expr(copied);
+        assert_eq!(shown.to_string(), shown_again.to_string());
     }
 
     #[test]
@@ -1205,10 +1221,8 @@ mod tests {
         fn get_dependencies(&self, deps: &mut Deps) {
             deps.insert(DepKey::type_of::<Self>());
         }
-    }
 
-    impl fmt::Display for Hp {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "Hp")
         }
     }

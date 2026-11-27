@@ -54,6 +54,10 @@ impl Expr<f32, Ctx> for Regen {
     fn get_dependencies(&self, deps: &mut Deps) {
         deps.insert(DepKey::type_of::<Self>());
     }
+
+    fn render(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Regen")
+    }
 }
 
 fn hp() -> Node<f32, Ctx, VarExpr<f32, Ctx>> {
@@ -76,6 +80,32 @@ fn state() -> State {
         hp: 8.0,
         ..Default::default()
     }
+}
+
+/// Trees print through `Expr::render`, which goes through the same vtable as `eval`,
+/// so an erased subtree renders inside the tree around it. `Regen` renders as its own
+/// name because the test leaf says so; the anonymous variable beside it has no name.
+#[test]
+fn a_boxed_sub_expression_prints_inside_its_tree() {
+    // Arithmetic, a method node, a comparison and boolean structure, with a boxed
+    // operand inside each — the four shapes that used to refuse to print.
+    assert_eq!((boxed_regen() + hp()).to_string(), "(Regen + var)");
+    assert_eq!(
+        (boxed_regen() + hp()).clamp(0.0, 10.0).to_string(),
+        "clamp((Regen + var), 0, 10)"
+    );
+    assert_eq!(boxed_regen().gt(boxed_hp()).to_string(), "(Regen > var)");
+    assert_eq!(
+        boxed_regen()
+            .gt(hp())
+            .and(boxed_regen().le(boxed_regen()))
+            .to_string(),
+        "((Regen > var) && (Regen <= Regen))"
+    );
+
+    // Erasure nested two levels deep still prints.
+    let deep = Node::from_expr(Box::new(boxed_regen() + hp()) as StoredExpr<f32, Ctx>);
+    assert_eq!((deep * 2.0).to_string(), "((Regen + var) * 2)");
 }
 
 #[test]

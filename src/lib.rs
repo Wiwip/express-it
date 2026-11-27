@@ -155,6 +155,10 @@ pub(crate) mod dep_probe {
         fn get_dependencies(&self, deps: &mut Deps) {
             deps.insert(DepKey::type_of::<A>());
         }
+
+        fn render(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", std::any::type_name::<A>())
+        }
     }
 
     pub fn attr<A: Attribute>() -> Node<f32, ProbeCtx, Probe<A>> {

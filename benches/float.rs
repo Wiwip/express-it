@@ -100,6 +100,10 @@ impl<K: 'static, C: Context> Expr<f32, C> for Leaf<K> {
     fn get_dependencies(&self, deps: &mut Deps) {
         deps.insert(DepKey::type_of::<K>());
     }
+
+    fn render(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", std::any::type_name::<K>())
+    }
 }
 
 struct Attack;
