@@ -23,12 +23,12 @@ express_it::ops     + - * / %, unary - and !, powf, min, max, abs, acos, sqrt, c
 express_it::logic   == != < <= > >=, not, and or xor nand nor nxor
 express_it::plan    Plan, PlanCache, PlanError, StepExecutor, AssignmentStep,
                     CacheLookupStep
-express_it          the six macros, each `#[macro_export]`ed, so this is their only
-                    home: all!, any!, save!, save_cache!, load_cache!, var_leaf!
-                    (`express_it::logic::all` and `express_it::plan::save` do not
-                    resolve — E0432)
+express_it          the seven macros, each `#[macro_export]`ed, so this is their
+                    only home: all!, any!, save!, save_with!, save_cache!,
+                    load_cache!, var_leaf! (`express_it::logic::all` and
+                    `express_it::plan::save` do not resolve — E0432)
 express_it::prelude every trait whose method you call, every step type you have to
-                    name, and all six macros, in one glob — the two tree shapes are
+                    name, and all seven macros, in one glob — the two tree shapes are
                     the deliberate exception
 ```
 
@@ -403,7 +403,7 @@ in the tree.
 Turning rows of data into one expression is the one place where a tree can grow
 taller than you meant. A loop cannot grow a `Node`'s *type* each iteration, so the
 only way to accumulate is to erase each step into `StoredExpr`, and that builds a
-chain: one `eval` frame per row, which measured 20,000 levels to overflow a 1 MiB
+chain: one `eval` frame per row, which measured 60,000 levels to overflow a 1 MiB
 stack and 100,000 to overflow an 8 MiB one — an abort, not an error.
 
 `Node::sum` and `Node::product` take the children as a `Vec` and fold them in a

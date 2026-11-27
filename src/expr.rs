@@ -402,9 +402,10 @@ impl fmt::Display for DepKey {
 /// a hash set. `Deps` is `PartialEq` (two sinks holding the same keys are equal,
 /// whatever order they went in) but is *not* `Ord` or `PartialOrd`: an ordering
 /// would claim a sequence the hash set does not have. A caller that wants keys in
-/// a stable order has to sort them itself — collect `DepKey::to_string` for each
-/// key and sort those. Sorting the `Option<&str>` from [`DepKey::as_name`] orders
-/// only the name keys, since every type key maps to `None`.
+/// a stable order uses [`Deps::to_sorted_vec`], which sorts by the `Ord` on
+/// `DepKey` — type keys before name keys — rather than exposing hash order. Sorting
+/// the `Option<&str>` from [`DepKey::as_name`] orders only the name keys, since
+/// every type key maps to `None`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Deps {
     keys: HashSet<DepKey>,
@@ -635,11 +636,11 @@ pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
 /// 4,000 for that reason.
 ///
 /// Dropping is the recursive part people forget: a chain that evaluated fine can
-/// still overflow when it goes out of scope. It cannot be made iterative here —
+/// still overflow when it goes out of scope. It cannot be made iterative here:
 /// `impl Drop for Node<N, C, StoredExpr<N, C>>` is rejected outright with
-/// `E0366: Drop impls cannot be specialized`, since `Node` derives `Copy` for other
-/// payloads — so the guidance is the same from both directions: fold into a `Vec`,
-/// do not chain.
+/// `E0366: Drop impls cannot be specialized`, because a `Drop` impl has to cover
+/// every instantiation of its type and `Node` is generic over its payload. So the
+/// guidance is the same from both directions: fold into a `Vec`, do not chain.
 pub type StoredExpr<N, C> = Box<dyn Expr<N, C> + Send + Sync>;
 
 // Forwards through `Box` so the alias above composes into a tree: without it a

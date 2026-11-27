@@ -12,10 +12,11 @@
 //! }
 //! ```
 //!
-//! which builds a linked chain one `eval` frame per row: measured on rustc 1.99.1,
-//! release, x86-64 Linux, such a chain survives 10,000 levels on a 256 KiB stack,
-//! overflows 1 MiB at 20,000 and the 8 MiB main thread at 100,000 — an abort, not
-//! an error you could match.
+//! which builds a linked chain one `eval` frame per row. Measured on rustc 1.99.1,
+//! release, x86-64 Linux: 4,000 levels run anywhere, 20,000 needs a 1 MiB stack,
+//! 60,000 overflows 1 MiB and 100,000 overflows the 8 MiB a main thread gets by
+//! default — an abort, not an error you could match. `StoredExpr` carries the same
+//! numbers and is the measurement of record.
 //!
 //! [`Node::sum`](crate::nodes::Node::sum) replaces that pattern with a vector:
 //! accumulate the *children* into a `Vec`, then build one node. Evaluation folds in
@@ -101,11 +102,12 @@ impl<N: Num> Fold<N> for Product {
 
 /// A reduction over a list of children held flat, in a `Vec`.
 ///
-/// `E` is the child expression type, and the node inherits its manners: with
-/// `E = Node<..>` it is `Copy` like any other node, and with
-/// `E = StoredExpr<..>` it holds mixed leaf types at the cost of `Clone`, and the
-/// vector inside it means no fold node is ever `Copy` — a node holding one is
-/// `Clone` when its children are, and that is all.
+/// `E` is the child expression type, and the node inherits its manners from it:
+/// with `E = Node<..>` of a `Clone` payload the fold is `Clone`, and with
+/// `E = StoredExpr<..>` it holds mixed leaf types and gives `Clone` up, the same
+/// trade every erased sub-expression makes. No fold is ever `Copy` — the children
+/// live in a `Vec`, and a `Vec` is not `Copy` whatever it holds — so composing a
+/// node that holds one moves it.
 ///
 /// Built through [`Node::sum`](crate::nodes::Node::sum) or
 /// [`Node::product`](crate::nodes::Node::product) rather than by hand.
@@ -134,8 +136,20 @@ impl<N: Num, C: Context, Op: Fold<N>, E: Expr<N, C>> Expr<N, C> for FoldNode<N, 
     #[inline]
     fn eval(&self, ctx: &C::ContextItem<'_, '_>) -> N {
         // A loop, not a recursion: this is the whole point of the node.
-        let mut acc = Op::identity();
-        for child in &self.children {
+        //
+        // The accumulator starts at the *first child*, not at the identity. Seeding
+        // with `N::zero()` is arithmetically innocent and still wrong: `0.0 + (-0.0)`
+        // is `+0.0`, so a zero-seeded fold turns a lone `-0.0` into `+0.0` where the
+        // hand-nested expression keeps it, and a fold is meant to be the same
+        // arithmetic written differently. Starting at the first child makes the fold
+        // evaluate exactly `((a op b) op c)`, bit for bit, and leaves the identity
+        // for the empty vector alone.
+        let mut children = self.children.iter();
+        let Some(first) = children.next() else {
+            return Op::identity();
+        };
+        let mut acc = first.eval(ctx);
+        for child in children {
             acc = Op::fold(acc, child.eval(ctx));
         }
         acc
@@ -196,7 +210,10 @@ impl<N: Num, C: Context, E> Node<N, C, FoldNode<N, C, Sum, E>> {
     /// let total = Node::sum(terms);
     /// ```
     ///
-    /// An empty list is `N::zero()` and prints as `0`.
+    /// The first child seeds the accumulator, so a fold evaluates exactly the
+    /// left-nested `((a + b) + c)` bit for bit — including a `-0.0`, which a
+    /// zero-seeded fold would turn into `+0.0`. An empty list is `N::zero()` and
+    /// prints as `0`.
     ///
     /// **A `Vec` holds one type.** Children of a single node type — `Vec<Node<f32,
     /// Ctx, Hp>>`, or `Vec<Node<f32, Ctx, LiteralNode<f32>>>` — go in directly.
@@ -211,7 +228,8 @@ impl<N: Num, C: Context, E> Node<N, C, FoldNode<N, C, Sum, E>> {
 
 impl<N: Num, C: Context, E> Node<N, C, FoldNode<N, C, Product, E>> {
     /// One node over many children, folded with `*`, evaluated in a loop. An empty
-    /// list is `N::one()` and prints as `1`.
+    /// list is `N::one()` and prints as `1`, and as with [`Node::sum`] the first
+    /// child seeds the accumulator, so the bits match the left-nested product.
     ///
     /// Note the ordering: a fold multiplies left to right, and floating-point
     /// multiplication is not associative, so this and a hand-nested `((a * b) * c)`

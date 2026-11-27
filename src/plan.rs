@@ -537,9 +537,10 @@ macro_rules! save_cache {
 /// [`PlanError::CacheMiss`] and a key holding another type is
 /// [`PlanError::CacheTypeMismatch`].
 ///
-/// The key is anything `Into<String>`, so an owned, run-time key works here even
-/// though `save_cache!` and [`Node::alias`](crate::nodes::Node::alias) demand
-/// `&'static str`.
+/// The key is anything `Into<String>`, as it is on every other side of the cache:
+/// `save_cache!`, `save!`'s fourth argument, [`Node::alias`](crate::nodes::Node::alias)
+/// and [`PlanCache::set`](crate::plan::PlanCache::set) all take one, so a key
+/// computed at run time works on the write side and the read side alike.
 #[macro_export]
 macro_rules! load_cache {
     ($ty:ty, $key:expr) => {{ $crate::plan::CacheLookupStep::<$ty>::new($key) }};

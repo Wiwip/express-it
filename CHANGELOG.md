@@ -4,7 +4,7 @@ Behaviour changes that matter to a caller of `express-it`: what started working,
 stopped working, or changed meaning. The current API is documented in `README.md`
 and in `cargo doc --open`; this file only records what moved between releases.
 
-## 0.4.0 — 2026-11-27
+## 0.4.0 — 2026-11-26
 
 Three things change what an existing program must write: rendering moved onto the
 `Expr` trait, cache keys are owned, and a named variable prints its name. The first
@@ -27,8 +27,11 @@ development environment: CI locking, and bevy gone from the dev-dependencies.
   clamp((Regen + var), 0, 10)
   ((Regen > var) && (Regen <= Regen))
   ```
-  Three consequences, and the text of every tree that printed before is unchanged —
-  all 205 tests pass with their display assertions untouched.
+  Three consequences, and the text of every tree that printed before is unchanged:
+  the 205 tests that existed at that commit passed with their display assertions
+  untouched, and `git diff v0.3.0..HEAD` over the test and source tree changes one
+  display assertion — the one that printed a `CastNode` struct directly, which is
+  consequence 2 above. Everything else is additions.
 
   1. **A hand-written `impl Expr` must add `render`.** `E0046: not all trait items
      implemented, missing: render`. For a leaf this is one line, `write!(f, "MyLeaf")`;
@@ -71,12 +74,19 @@ development environment: CI locking, and bevy gone from the dev-dependencies.
 1. `cargo build` fails with `E0046: not all trait items implemented, missing:
    render` on each hand-written `impl Expr<..>`. Add the method — for a leaf,
    `fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "MyLeaf") }`.
-   Leaves from `var_leaf!` and every node in the crate already have it.
+   A hand-written *composite* cannot use `write!(f, "{}", self.lhs)` either, since a
+   child is now known only as `Expr` and no node struct is `Display` any more; it
+   calls `self.lhs.render(f)?`. Leaves from `var_leaf!` and every node in the crate
+   already have all of this.
 2. Printing a node *struct* directly (`CastNode`, `AddNode`, …) no longer compiles.
    Print the `Node`: `Node::from_expr(cast_node).to_string()`.
-3. If your value type `N` is your own and has no `Display`, `Node::lit(value)` now
-   fails to resolve. Implement `Display` for it; a literal is printed, so the crate
-   will not build an expression it cannot render.
+3. If your value type `N` is your own and has no `Display`, the error is not at
+   `Node::lit(value)` — that constructor never asked for `Display` and still does
+   not. It is `E0277: MyType: Display is not satisfied` at the first place the
+   literal has to *be* an expression — under an operator, in a comparison, at
+   `eval`, or when the tree around it is printed — because the bound sits on the
+   `Expr` impl of `LiteralNode`. Implement `Display` for the type: the crate will not build an
+   expression it cannot render.
 4. A `CacheSaveStep { key, expr }` struct literal must hand over an owned key.
    `CacheSaveStep::new(key, expr)`, `node.alias(key)` and `save_cache!(key, expr)`
    all take `impl Into<String>`, so a `String` computed at run time works.
@@ -103,17 +113,22 @@ and step 5 is the one string that moves at run time.
 
   Evaluation, the dependency walk, printing and drop all loop, so the stack cost
   does not grow with the row count: 100,000 children evaluate on a 256 KiB stack,
-  where the erased chain of the same size aborts the process. Folds are exact
-  against the nested form (the seed is `0` or `1`, and `0 + a` is exact); an empty
-  fold is the identity and prints `0` or `1`; children of one node type keep the
+  where the erased chain of the same size aborts the process. The first child seeds
+  the accumulator, so a fold evaluates exactly the left-nested `((a + b) + c)` bit
+  for bit; a `0`-seeded fold — what this was first written as — turns a lone `-0.0`
+  into `+0.0`, because `0.0 + (-0.0)` is `+0.0`. The identity is used only for the
+  empty vector, which prints `0` or `1`, and a single-child fold evaluates to that
+  child unchanged while printing it parenthesised, `(-0)` where the bare literal
+  prints `-0`; children of one node type keep the
   fold `Clone`, while mixed leaf types need `StoredExpr` children — a `Vec` holds
   one type — and give `Clone` up as every erased tree does. No fold is `Copy`,
   because a `Vec` is in the way, so composing one moves it.
 
   Making the drop of an *existing* chain iterative was attempted and is impossible:
   `impl Drop for Node<N, C, StoredExpr<N, C>>` is rejected with
-  `E0366: Drop impls cannot be specialized`, since `Node` derives `Copy` for other
-  payloads. Documented on `StoredExpr`.
+  `E0366: Drop impls cannot be specialized`, because a `Drop` impl must cover every
+  instantiation of its type and `Node` is generic over its payload. Documented on
+  `StoredExpr`.
 - `Deps` grew the set algebra a dependency watcher needs — `intersect_with`,
   `difference_with`, `is_subset_of` — plus `names()`, `types()` and
   `to_sorted_vec()`, which sorts rather than exposing hash order. `iter` still
@@ -208,9 +223,13 @@ traits, and switching it on would fail CI on the day it was enabled.
 
 ### Verification
 
-`cargo test` on 0.4.0 runs 218 tests: 129 unit, 5 captured-variable, 11 fold, 7
+`cargo test` on 0.4.0 runs 219 tests: 129 unit, 5 captured-variable, 12 fold, 7
 macro hygiene, 7 plan, 13 prelude, 19 property, 5 stored-expression, 19 doctests
-(2 ignored) and 3 `compile_fail` doctests. Every display assertion carried over
+(2 ignored) and 3 `compile_fail` doctests. The 129 is the runner's number in either
+profile, and it is one short of the 130 `#[test]` attributes in `src/` because two
+tests trade places between profiles: the `#[should_panic]` overflow test is
+`#[cfg(debug_assertions)]` and its wrapping counterpart is
+`#[cfg(not(debug_assertions))]`, so exactly one of the two exists in any build. Every display assertion carried over
 from 0.3 unchanged, which is the evidence that moving rendering onto `Expr` did not
 change what a tree prints; the new fold tests add the erased-tree printings.
 

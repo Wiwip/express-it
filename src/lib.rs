@@ -13,7 +13,8 @@ pub mod expr;
 ///
 /// These exist because of stack depth. Accumulating a tree in a loop means erasing
 /// each step, and an erased chain costs one `eval` frame per element — measured at
-/// 20,000 levels overflowing a 1 MiB stack, with an abort rather than an error.
+/// 1 MiB stack at 60,000 levels and the 8 MiB main thread at 100,000, with an
+/// abort rather than an error.
 /// Accumulate the children into a vector instead and the depth stays at one node.
 pub mod fold;
 /// Comparison and boolean structure: the `.lt()`/`.le()`/`.gt()`/`.ge()`/`.eq()`
@@ -56,7 +57,7 @@ pub mod plan;
 /// plus the items a caller has to name rather than call: `StepExecutor` and the
 /// three step types for a custom step, `PlanCache` for its signatures,
 /// `AsCast` for a generic cast bound, and `Deps` with `DepKey` for a leaf of your
-/// own that reports dependencies. It also re-exports all six exported macros —
+/// own that reports dependencies. It also re-exports all seven exported macros —
 /// `all!`, `any!`, `save!`, `save_cache!`, `load_cache!`, and `var_leaf!` — so the
 /// one glob carries the macros along with the traits.
 ///

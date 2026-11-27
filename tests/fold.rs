@@ -79,8 +79,8 @@ fn a_sum_of_a_vector_evaluates_exactly_like_the_nested_chain() {
     let flat = Node::sum(erased(vec![box_it(hp()), box_it(bonus()), box_it(hp())]));
     let nested = (hp() + bonus()) + hp();
 
-    // Bits, not an approximate comparison: the fold starts from `0` and `0 + a` is
-    // exact, so the association order of the two trees comes out the same.
+    // Bits, not an approximate comparison: the fold starts at its first child, so
+    // the association order is exactly the left-nested one.
     assert_eq!(flat.eval(&ctx).to_bits(), nested.eval(&ctx).to_bits());
     assert_eq!(flat.eval(&ctx), 7.0);
 }
@@ -94,6 +94,33 @@ fn a_product_of_a_vector_evaluates_exactly_like_the_nested_chain() {
 
     assert_eq!(flat.eval(&ctx).to_bits(), nested.eval(&ctx).to_bits());
     assert_eq!(flat.eval(&ctx), 12.0);
+}
+
+/// The accumulator is seeded with the first child rather than with `N::zero()`, and
+/// this is where that shows: `0.0 + (-0.0)` is `+0.0`, so a zero-seeded fold turns a
+/// lone negative zero into positive zero where `(a)` and even `a` alone keep it.
+#[test]
+fn a_fold_preserves_negative_zero_where_a_zero_seeded_fold_would_not() {
+    let flat = Node::sum(vec![Node::<f32, Ctx, _>::lit(-0.0f32)]);
+    let bare = Node::<f32, Ctx, _>::lit(-0.0f32);
+
+    assert_eq!(
+        flat.eval(&state()).to_bits(),
+        bare.eval(&state()).to_bits(),
+        "the fold's value is the child's value, sign bit included"
+    );
+    assert!(flat.eval(&state()).is_sign_negative());
+    // The fold still prints as a fold: one child, parenthesised.
+    assert_eq!(flat.to_string(), "(-0)");
+    assert_eq!(bare.to_string(), "-0");
+
+    let neg = || Node::<f32, Ctx, _>::lit(-0.0f32);
+    let two = Node::sum(vec![neg(), neg()]);
+    let nested = neg() + neg();
+    assert_eq!(
+        two.eval(&state()).to_bits(),
+        nested.eval(&state()).to_bits()
+    );
 }
 
 #[test]
