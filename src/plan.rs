@@ -14,6 +14,13 @@ pub struct PlanCache {
 }
 
 impl PlanCache {
+    /// Stores `value` under `key`, replacing whatever was there.
+    ///
+    /// Replacement is by key alone, so writing an `i32` over an `f32` already held
+    /// under `"damage"` succeeds and leaves the cache holding an `i32`. The next
+    /// `get::<f32>` answers `None`, and a `load_cache!` step for `f32` reports
+    /// [`PlanError::CacheTypeMismatch`] — a wrong-type write is visible as that
+    /// error at the first reader, never as a stale value.
     #[inline]
     pub fn set<T: 'static>(&mut self, key: impl Into<String>, value: T) {
         self.values.insert(key.into(), Box::new(value));
@@ -38,6 +45,46 @@ impl PlanCache {
     #[inline]
     pub fn contains_key(&self, key: &str) -> bool {
         self.values.contains_key(key)
+    }
+
+    /// How many entries the cache holds, of any type.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Whether nothing has been cached yet.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// The keys currently held, in unspecified order — a `HashMap` has no sequence
+    /// to promise, and a run has no reason to pay for one. Sort the collected keys
+    /// if you need a stable listing. Keys carry no type, so pairing this with
+    /// [`PlanCache::has::<T>`] is how you ask which of them hold a `T`.
+    #[inline]
+    pub fn keys(&self) -> impl Iterator<Item = &str> + '_ {
+        self.values.keys().map(String::as_str)
+    }
+
+    /// Drops the entry under `key`; `false` when there was none. Whatever type it
+    /// held is dropped with it, which is what makes this the only removal that
+    /// works when the held type is not known here.
+    #[inline]
+    pub fn remove(&mut self, key: &str) -> bool {
+        self.values.remove(key).is_some()
+    }
+
+    /// Drops every entry, keeping the allocation.
+    ///
+    /// [`Plan::run`] builds a fresh cache per run and drops it at the end, so this
+    /// is reachable only from a custom [`StepExecutor::apply`], which is handed
+    /// `&mut PlanCache` — the one place a step can decide that everything cached so
+    /// far is stale.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.values.clear();
     }
 }
 
@@ -202,6 +249,20 @@ impl<C: ContextMut> Plan<C> {
     {
         self.steps.push(Box::new(step));
         self
+    }
+
+    /// How many steps the plan holds. A tuple of steps counts as one step, because
+    /// the tuple is one step: see [`StepExecutor`].
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.steps.len()
+    }
+
+    /// Whether the plan holds no step at all, in which case [`Plan::run`] allocates
+    /// a cache and returns `Ok(())` without touching the context.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
     }
 }
 
@@ -851,5 +912,79 @@ mod tests {
 
         assert!(matches!(err, PlanError::StepValueMismatch { .. }));
         assert_eq!((state.a, state.b), (0, 0));
+    }
+
+    #[test]
+    fn cache_len_keys_remove_and_clear_track_the_entries() {
+        let mut cache = PlanCache::default();
+        assert!(cache.is_empty());
+
+        cache.set("hp", 10i32);
+        cache.set("scale", 2.0f32);
+        assert_eq!(cache.len(), 2);
+        assert!(!cache.is_empty());
+
+        let mut keys: Vec<&str> = cache.keys().collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["hp", "scale"], "keys lists entries of every type");
+
+        // Removal is by key alone: the caller does not have to know the entry
+        // holds an i32, which `get::<T>` and `has::<T>` both insist on.
+        assert!(cache.remove("hp"));
+        assert!(
+            !cache.remove("hp"),
+            "a second removal has nothing to remove"
+        );
+        assert!(!cache.contains_key("hp"));
+        assert!(cache.has::<f32>("scale"), "the other entry is untouched");
+
+        cache.clear();
+        assert!(
+            cache.is_empty(),
+            "clear is the one invalidation a custom step can apply to everything"
+        );
+    }
+
+    #[test]
+    fn a_replaced_key_holds_the_new_type_and_not_the_old_one() {
+        let mut cache = PlanCache::default();
+        cache.set("damage", 35i32);
+        cache.set("damage", 2.5f32);
+
+        assert_eq!(
+            cache.len(),
+            1,
+            "a write over a key replaces, it does not add"
+        );
+        assert!(cache.get::<i32>("damage").is_none());
+        assert_eq!(cache.get::<f32>("damage"), Some(&2.5));
+        assert!(
+            cache.contains_key("damage"),
+            "the key is still there, holding another type — the distinction \
+             `has::<T>` collapses and a reader turns into CacheTypeMismatch"
+        );
+    }
+
+    #[test]
+    fn plan_reports_its_step_count_and_a_tuple_counts_once() {
+        let empty = Plan::<Ctx>::new();
+        assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
+
+        let mut state = State::default();
+        empty
+            .run(&mut state)
+            .expect("an empty plan runs and changes nothing");
+        assert_eq!(state, State::default());
+
+        let one = Plan::<Ctx>::new().step(save!(State, hp, Node::lit(1)));
+        assert_eq!(one.len(), 1);
+        assert!(!one.is_empty());
+
+        let grouped = Plan::<Ctx>::new().step((
+            save!(State, hp, Node::lit(1)),
+            save!(State, note, Node::lit(2)),
+        ));
+        assert_eq!(grouped.len(), 1, "the tuple is one step, not two");
     }
 }

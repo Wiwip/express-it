@@ -4,6 +4,41 @@ Behaviour changes that matter to a caller of `express-it`: what started working,
 stopped working, or changed meaning. The current API is documented in `README.md`
 and in `cargo doc --open`; this file only records what moved between releases.
 
+## Unreleased
+
+Work toward 0.4.0. Nothing here changes what an existing program does: the API
+additions are additive, and the CI change alters only what the repository
+guarantees about its own dependency graph.
+
+### Added
+
+- `Deps` grew the set algebra a dependency watcher needs — `intersect_with`,
+  `difference_with`, `is_subset_of` — plus `names()`, `types()` and
+  `to_sorted_vec()`, which sorts rather than exposing hash order. `iter` still
+  walks the set in unspecified order and still allocates nothing.
+- `DepKey` is now `Ord`: type keys before name keys, in the order the variants are
+  declared, which is what `to_sorted_vec` sorts by. The type half is ordered by
+  `TypeId`, whose own ordering the standard library derives from a hash — see the
+  method docs for what that does and does not promise.
+- `PlanCache` grew `len`, `is_empty`, `keys`, `remove` and `clear`. A custom
+  `StepExecutor` could write and read cache entries but could not enumerate them,
+  drop one, or invalidate the lot.
+- `Plan` grew `len` and `is_empty`, counting a tuple of steps as the single step it
+  is.
+- `[package.metadata.docs.rs]` with `all-features = true`, so docs.rs builds what a
+  consumer reads. The crate declares no features today, so this changes nothing
+  about what gets built.
+
+### Changed
+
+- Every cargo invocation in CI now passes `--locked`; `cargo fmt` takes no such
+  flag, so it is the one exception. A plain `cargo bench --no-run` had been
+  rewriting `Cargo.lock` (blake3 1.8.7 to 1.8.8) while every check stayed green,
+  which means CI could test a graph nobody had run locally.
+
+Library `missing_docs` warnings went from 149 to 148: `PlanCache::set` had none,
+and everything added here ships with one.
+
 ## 0.3.0
 
 A breaking release. Whether 0.2.0 ever reached a registry cannot be established

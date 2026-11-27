@@ -279,7 +279,7 @@ pub trait Expr<N, C: Context> {
 /// key carries nothing but its string. One spelling therefore means one attribute
 /// across the whole crate — and `""`, being a legal string, is a legal key that
 /// every empty-named variable shares.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum DepKey {
     /// Identity of a leaf type: what `var_leaf!` and hand-written leaves report.
     Type(TypeId),
@@ -449,6 +449,69 @@ impl Deps {
     #[inline(always)]
     pub fn union_with(&mut self, other: &Deps) {
         self.keys.extend(other.keys.iter().copied());
+    }
+
+    /// Keeps only the keys `other` also holds — the keys two subtrees read in
+    /// common.
+    #[inline(always)]
+    pub fn intersect_with(&mut self, other: &Deps) {
+        self.keys.retain(|key| other.keys.contains(key));
+    }
+
+    /// Drops every key `other` also holds — what this subtree reads that the other
+    /// does not. With a previously collected set on the right it answers "did this
+    /// tree start reading anything new?": a non-empty result after the difference
+    /// is the change a watcher has to react to.
+    #[inline(always)]
+    pub fn difference_with(&mut self, other: &Deps) {
+        self.keys.retain(|key| !other.keys.contains(key));
+    }
+
+    /// Whether every key of `self` is also in `other` — [`Deps::is_superset_of`]
+    /// read from the other end, kept because "does this tree still read only what
+    /// it used to?" is the question a cache invalidation asks.
+    #[inline(always)]
+    pub fn is_subset_of(&self, other: &Deps) -> bool {
+        other.keys.is_superset(&self.keys)
+    }
+
+    /// The keys in one stable order: type keys first, in [`TypeId`]'s own order,
+    /// then name keys in lexicographic order — the order [`Ord`] gives the
+    /// variants as they are declared.
+    ///
+    /// [`Deps::iter`] explains why a walk over the sink iterates in unspecified
+    /// order instead of paying for a sequence it may never need. This call pays
+    /// for one, once, for output two runs of the same binary agree on: printing a
+    /// tree's keys, or folding them into a build artefact.
+    ///
+    /// The reproducibility has one seam. Name keys sort lexicographically and are
+    /// fully reproducible; type keys sort by [`TypeId`], which the standard library
+    /// derives from a hash of the type, so that half is a total order within a
+    /// program but carries no promise that another build reaches the same one.
+    pub fn to_sorted_vec(&self) -> Vec<DepKey> {
+        let mut keys: Vec<DepKey> = self.keys.iter().copied().collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    /// The name keys — every [`Node::var`] variable the tree reads, in
+    /// unspecified order. `names().count() + types().count()` is always
+    /// [`Deps::len`]: the two accessors partition the set.
+    #[inline(always)]
+    pub fn names(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.keys.iter().copied().filter_map(DepKey::as_name)
+    }
+
+    /// The type keys — what `var_leaf!` and hand-written leaves report, in
+    /// unspecified order. The generic-leaf caveat on [`Deps::contains_type_of`]
+    /// applies to the contents: a leaf keyed by its own type parameter shows up
+    /// here as that parameter, not as the leaf.
+    #[inline(always)]
+    pub fn types(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.keys.iter().filter_map(|key| match key {
+            DepKey::Type(id) => Some(*id),
+            DepKey::Name(_) => None,
+        })
     }
 }
 
@@ -728,5 +791,85 @@ mod tests {
         emptied.insert(DepKey::name("hp"));
         emptied.clear();
         assert!(emptied.is_empty(), "clear empties the sink for reuse");
+    }
+
+    #[test]
+    fn sorted_keys_put_type_keys_before_names_and_names_lexicographically() {
+        let deps: Deps = [
+            DepKey::name("mp"),
+            DepKey::name("hp"),
+            DepKey::type_of::<u8>(),
+            DepKey::type_of::<u32>(),
+        ]
+        .into_iter()
+        .collect();
+
+        let sorted = deps.to_sorted_vec();
+        assert_eq!(sorted.len(), 4);
+        let types = sorted.iter().take_while(|key| key.as_name().is_none());
+        let names: Vec<&str> = sorted
+            .iter()
+            .skip_while(|key| key.as_name().is_none())
+            .map(|key| key.as_name().expect("past the type half"))
+            .collect();
+        assert_eq!(
+            types.count(),
+            2,
+            "the declared variant order puts types first"
+        );
+        assert_eq!(names, ["hp", "mp"], "and the name half is lexicographic");
+        assert_eq!(
+            sorted,
+            deps.to_sorted_vec(),
+            "two calls, and two runs of this binary, agree on the order"
+        );
+    }
+
+    #[test]
+    fn names_and_types_partition_the_set() {
+        let deps: Deps = [
+            DepKey::name("hp"),
+            DepKey::name("attack"),
+            DepKey::type_of::<u32>(),
+        ]
+        .into_iter()
+        .collect();
+
+        let mut names: Vec<&str> = deps.names().collect();
+        names.sort_unstable();
+        assert_eq!(names, ["attack", "hp"]);
+        assert_eq!(deps.types().count(), 1);
+        assert_eq!(
+            deps.names().count() + deps.types().count(),
+            deps.len(),
+            "every key is exactly one of the two kinds"
+        );
+    }
+
+    #[test]
+    fn set_combinators_answer_the_questions_a_watcher_asks() {
+        let before: Deps = [DepKey::name("hp"), DepKey::type_of::<u32>()]
+            .into_iter()
+            .collect();
+        let after: Deps = [
+            DepKey::name("hp"),
+            DepKey::name("luck"),
+            DepKey::type_of::<u32>(),
+            DepKey::type_of::<i64>(),
+        ]
+        .into_iter()
+        .collect();
+
+        assert!(before.is_subset_of(&after));
+        assert!(!after.is_subset_of(&before));
+
+        let mut added = after.clone();
+        added.difference_with(&before);
+        assert_eq!(added.len(), 2, "the two keys that were not read before");
+        assert!(added.contains_name("luck"));
+
+        let mut shared = after.clone();
+        shared.intersect_with(&before);
+        assert_eq!(shared, before, "and the overlap is exactly the old set");
     }
 }
