@@ -67,6 +67,19 @@ dependency.
 
 ### Changed
 
+- The comparison (`.gt()`, `.le()`, …) and boolean (`.and()`, `.or()`, `.not()`, …)
+  combinators no longer require their operands to be `Copy`, and
+  `AsExpression for Node` no longer requires `Clone`. Neither bound was used by the
+  method bodies, which move their operands in; both were left over from an era when
+  the combinators wanted to hand their result back reusable, and together they made
+  an erased subtree unusable in logic. `Node::from_expr(Box::new(…))` is now a
+  first-class boolean operand: `boxed_a.gt(boxed_b).or(boxed_c).and(…)` compiles and
+  evaluates, chaining as deep as the operands can be moved.
+
+  Nothing was added, so nothing that compiled before stops compiling; every existing
+  test still passes unchanged, including the one that reuses a `Copy` node on both
+  sides of two comparisons. What is *not* gained: a node whose children are erased
+  is still not `Copy` or `Clone`, so reuse across two trees still wants `Rc`.
 - Every cargo invocation in CI now passes `--locked`; `cargo fmt` takes no such
   flag, so it is the one exception. A plain `cargo bench --no-run` had been
   rewriting `Cargo.lock` (blake3 1.8.7 to 1.8.8) while every check stayed green,

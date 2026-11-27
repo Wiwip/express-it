@@ -187,12 +187,12 @@ pub trait ContextMut: Context {
 /// neither is reachable from the other: the first gives a leaf its identity from
 /// its type, the second from a name.
 ///
-/// Two things that are not two methods, but bite anyway. Composing a node with
-/// another needs `Copy` — the comparison and logical combinator impls require
-/// `L: Expr<N, C> + Copy` — so a leaf that cannot be `Copy` can be held behind
-/// [`Box`], whose `Expr` impl forwards, which keeps it a usable tree payload and
-/// composable with the arithmetic operators; a box is never `Copy`, though, so it
-/// still cannot take `.lt()` or `.and()` — see [`StoredExpr`]. And
+/// Two things bite anyway. Composing a node moves it, and nothing asks an operand
+/// to be `Copy` — arithmetic, comparison and boolean combinators all take any
+/// `Expr` — so a leaf that cannot be `Copy` belongs behind [`Box`], whose `Expr`
+/// impl forwards and which stays a usable payload in every position a tree has.
+/// What the box gives up is `Copy` and `Clone` themselves, so a node that has gone
+/// into a box does not come back out into a second tree — see [`StoredExpr`]. And
 /// `get_dependencies` has a **default body that adds nothing**: correct for a
 /// literal, silently wrong for a composite, which then reports a strict *subset*
 /// of what it reads. That is the one direction the may-read contract below does
@@ -576,11 +576,15 @@ pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
 /// chosen at runtime (or stored in a heterogeneous collection) instead of being
 /// named in the type.
 ///
-/// One limitation follows from the box itself: it is never `Copy`, so a
-/// `StoredExpr` composes with the arithmetic operators and the method nodes
-/// (`max`, `clamp`, `sqrt`, …) but not with the comparison (`.ge()`, `.le()`, …)
-/// or logical (`.and()`, `.or()`, …) combinators, whose impls require
-/// `L: Expr<N, C> + Copy`.
+/// What the box does *not* cost is composition. Every combinator in the crate —
+/// arithmetic, the method nodes (`max`, `clamp`, `sqrt`, …), comparison (`.ge()`,
+/// `.le()`, …) and boolean (`.and()`, `.or()`, …) alike — takes its operands by
+/// value and requires only `Expr`, so a `StoredExpr` stands in a boolean position
+/// exactly as it stands in an arithmetic one, and chains keep working as long as
+/// each step moves its operand. What the box does cost is reuse: it is never
+/// `Copy`, and `Box<dyn Expr>` is not `Clone` either, so an erased child cannot be
+/// handed to two trees, and a tree that erases its children is neither `Copy` nor
+/// `Clone` until it is rebuilt around a shared pointer.
 ///
 /// The box brings a second limitation: it is not `Display`, and `impl Display for
 /// Node` asks its payload to be, so a tree deepened by boxing a sub-expression
@@ -646,7 +650,7 @@ pub trait AsExpression<N, C: Context> {
 
 impl<N, C: Context, E> AsExpression<N, C> for Node<N, C, E>
 where
-    E: Expr<N, C> + Clone + Send + Sync + 'static,
+    E: Expr<N, C> + Send + Sync + 'static,
 {
     type Target = E;
 

@@ -12,8 +12,10 @@ pub mod expr;
 /// nodes, the `.and()`/`.or()`/`.not()` … combinators, and the `any!`/`all!`
 /// macros.
 ///
-/// Every combinator here requires its operands to be `Copy`, which is why a
-/// boxed sub-expression can be arithmetic but not logic.
+/// The combinators take their operands by value and ask nothing of them beyond
+/// `Expr`, so a boxed sub-expression works in logic exactly as it does in
+/// arithmetic. What boxing costs is `Copy`: a node you have moved into a tree comes
+/// back by `clone`, not by copy.
 pub mod logic;
 /// The tree itself: [`Node`](nodes::Node), the leaves it is built from
 /// ([`LiteralNode`](nodes::LiteralNode), [`VarExpr`](nodes::VarExpr)), the

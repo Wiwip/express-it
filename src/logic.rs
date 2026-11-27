@@ -29,7 +29,7 @@ pub trait ExprLogicNot {
     fn not(self) -> Self::Output;
 }
 
-impl<C: Context, L: Expr<bool, C> + Copy> ExprLogicNot for Node<bool, C, L> {
+impl<C: Context, L: Expr<bool, C>> ExprLogicNot for Node<bool, C, L> {
     type Output = Node<bool, C, LogicalNotNode<L>>;
 
     #[inline(always)]
@@ -97,9 +97,8 @@ macro_rules! impl_cmp_method {
         where
             N: $bound + Copy,
             C: Context,
-            L: Expr<N, C> + Copy,
+            L: Expr<N, C>,
             R: AsExpression<N, C>,
-            R::Target: Copy,
         {
             type Output = Node<bool, C, $node_name<N, L, R::Target>>;
 
@@ -156,9 +155,8 @@ macro_rules! impl_logical_method {
         impl<C, L, R> $trait_name<R> for Node<bool, C, L>
         where
             C: Context,
-            L: Expr<bool, C> + Copy,
+            L: Expr<bool, C>,
             R: AsExpression<bool, C>,
-            R::Target: Copy,
         {
             type Output = Node<bool, C, $node_name<L, R::Target>>;
 
@@ -216,9 +214,8 @@ macro_rules! impl_neg_logical_method {
         impl<C, L, R> $trait_name<R> for Node<bool, C, L>
         where
             C: Context,
-            L: Expr<bool, C> + Copy,
+            L: Expr<bool, C>,
             R: AsExpression<bool, C>,
-            R::Target: Copy,
         {
             type Output = Node<bool, C, $node_name<L, R::Target>>;
 

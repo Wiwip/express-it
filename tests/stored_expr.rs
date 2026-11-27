@@ -6,13 +6,15 @@
 //! nor an operand.
 //!
 //! Scope note: arithmetic (`+ - * / %`) and the method nodes (`max`, `min`, `clamp`,
-//! `sqrt`, …) only require their operands to implement `Expr`, so a boxed operand
-//! works there. The comparison (`gt`, `le`, …) and boolean (`and`, `or`, …) methods
-//! additionally require `Copy` operands, which a trait object never is; feeding a
-//! `StoredExpr` straight into `.ge(..)` is still a compile error, and that is a
-//! pre-existing bound of those two modules rather than something this alias can fix.
+//! `sqrt`, …) have always taken any operand that implements `Expr`, so a boxed
+//! operand works there. The comparison (`gt`, `le`, …) and boolean (`and`, `or`, …)
+//! methods used to ask their operands for `Copy` as well, which a trait object never
+//! is; that bound is gone, so logic takes a boxed operand exactly as arithmetic
+//! does. `a_boxed_sub_expression_composes_in_boolean_positions` pins it, because the
+//! bound was easy to write again by accident.
 
 use express_it::expr::{Context, ContextMut, DepKey, Deps, Expr, StoredExpr};
+use express_it::logic::{ExprCmpGt, ExprCmpLe, ExprCmpLt, ExprLogicalAnd, ExprLogicalOr};
 use express_it::nodes::{Node, VarExpr};
 use express_it::ops::ExprClamp;
 use express_it::plan::Plan;
@@ -63,6 +65,12 @@ fn boxed_regen() -> Node<f32, Ctx, StoredExpr<f32, Ctx>> {
     Node::from_expr(Box::new(Regen))
 }
 
+/// The variable behind the same alias, so a test can put two non-`Copy`,
+/// non-`Clone` operands on opposite sides of one operator.
+fn boxed_hp() -> Node<f32, Ctx, StoredExpr<f32, Ctx>> {
+    Node::from_expr(Box::new(hp()))
+}
+
 fn state() -> State {
     State {
         hp: 8.0,
@@ -111,4 +119,39 @@ fn a_boxed_sub_expression_is_the_expression_of_a_plan_step() {
         .expect("an assignment step never fails to evaluate");
 
     assert_eq!(state.healed, 12.0);
+}
+
+#[test]
+fn a_boxed_sub_expression_composes_in_boolean_positions() {
+    // Every operand here is a trait object: never `Copy`, never `Clone`. Comparison
+    // between two of them, then boolean structure, then a boxed boolean fed back
+    // into another comparison's `and`, which is where the removed `Copy` bound used
+    // to stop the program dead.
+    //
+    // regen is 4.0, hp is 8.0.
+    let regen_wins = boxed_regen().gt(boxed_hp()); // false
+    let not_falling = boxed_regen().le(boxed_regen()); // true
+    let either = regen_wins.or(not_falling); // true
+
+    let boxed_flag = Node::from_expr(Box::new(either)); // bool, erased
+    let regen_positive = boxed_regen().gt(0.0); // true
+    let both = boxed_flag.and(regen_positive); // true
+
+    assert!(both.eval(&state()));
+
+    // Dependency keys still arrive through all that boxing.
+    let deps = (boxed_regen().gt(boxed_hp())).dependencies();
+    assert!(
+        deps.contains_type_of::<Regen>(),
+        "the boxed leaf keeps its key through a comparison"
+    );
+    assert!(
+        deps.contains_type_of::<VarExpr<f32, Ctx>>(),
+        "and so does the boxed variable beside it"
+    );
+
+    // A boxed boolean in a method chain of its own: `.lt()` on boxed operands,
+    // negated by the boolean layer, still evaluates.
+    let falling = Node::from_expr(Box::new(boxed_regen().lt(boxed_hp())));
+    assert!(falling.eval(&state()));
 }
