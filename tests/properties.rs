@@ -4,10 +4,11 @@
 //! example was an instance of: dependency keys propagate through every
 //! combinator, the two keying schemes stay apart, evaluation is a pure function
 //! of tree and context, the arithmetic and boolean laws the docs lean on hold for
-//! any input, `cast` really is `as`, and a plan stops exactly where it failed.
+//! any input, `cast` really is `as`, a plan stops exactly where it failed, and a
+//! tuple step both snapshots once and routes its values by position.
 //!
 //! Configuration: 300 cases per property, a little above the 256 default, which
-//! runs the fifteen property tests in about a tenth of a second. The case count is
+//! runs the nineteen property tests in about a tenth of a second. The case count is
 //! the knob for a deeper sweep and it is what sets the wall time, not the number of
 //! properties: `PROPTEST_CASES=10000` takes 2.2 s and `PROPTEST_CASES=25000` takes
 //! 5.4 s, both green.
@@ -1410,6 +1411,43 @@ proptest! {
             prop_assert!(result.is_ok(), "a plan with no failing step must succeed: {:?}", result);
             prop_assert_eq!(written, expected, "a successful run leaves every field set");
         }
+    }
+
+    /// A tuple of steps is ONE step: every element evaluates against the context as
+    /// it stood when the step began, and the values produced return to the elements
+    /// by position — element one gets value one.
+    ///
+    /// Randomised rather than pinned to one example because the mapping is
+    /// positional, and the defect it guards against was a last-in-first-out read of
+    /// the value vector. One value hides that bug, and two equal values hide it too,
+    /// so the inputs have to differ.
+    #[test]
+    fn a_tuple_step_uses_one_snapshot_and_returns_values_by_position(first in any::<i32>()) {
+        prop_assume!(first != SENTINEL);
+
+        let plan = Plan::<PlanCtx>::new().step((
+            AssignmentStep::<i32, _, _>::new(SETTERS[0], Node::lit(first), None),
+            AssignmentStep::<i32, _, _>::new(
+                SETTERS[1],
+                Node::new(|state: &PlanState| state.a),
+                None,
+            ),
+        ));
+
+        let mut state = PlanState::sentinel();
+        plan.run(&mut state)
+            .expect("a two-element tuple step has no reason to fail");
+
+        prop_assert_eq!(
+            state.a,
+            first,
+            "element one received its own value, not element two's"
+        );
+        prop_assert_eq!(
+            state.b,
+            SENTINEL,
+            "element two read `a` as the step began; the tuple evaluates before it applies"
+        );
     }
 }
 

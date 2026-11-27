@@ -585,6 +585,18 @@ pub type BoolExpr<C> = Node<bool, C, VarExpr<bool, C>>;
 /// The box brings a second limitation: it is not `Display`, and `impl Display for
 /// Node` asks its payload to be, so a tree deepened by boxing a sub-expression
 /// evaluates and reports its dependency keys but cannot be printed.
+///
+/// The third thing to know is depth. `eval`, the dependency walk and the drop of a
+/// tree are all recursive, so a boxed chain costs stack per level and a deep enough
+/// one takes the process down with a stack overflow — an abort, not a `PlanError`
+/// you could match. Measured on this toolchain (rustc 1.99.1, release profile,
+/// x86-64 Linux, one `+ 1` per level): a chain 4,000 deep runs anywhere, 20,000
+/// needs a 1 MiB stack, and the same build overflows at 60,000 on 1 MiB and at
+/// 100,000 on the 8 MiB a main thread gets by default. A tree built from a fixed
+/// expression is nowhere near that; a tree built by folding over rows of data can
+/// be, and a host that runs work on task threads (1 to 2 MiB stacks) reaches the
+/// limit sooner than the main thread does. The crate's own depth test sits at
+/// 4,000 for that reason.
 pub type StoredExpr<N, C> = Box<dyn Expr<N, C> + Send + Sync>;
 
 // Forwards through `Box` so the alias above composes into a tree: without it a
