@@ -35,28 +35,22 @@ impl<N: 'static + Clone, C: Context, E: Expr<N, C>> Node<N, C, E> {
     /// [`PlanCache`](crate::plan::PlanCache) under `key` — the method form of
     /// [`save_cache!`](crate::save_cache!).
     ///
-    /// The key is `&'static str`, so it must be a literal, a `const`, or
-    /// otherwise outlive the whole program. A key built at run time will not
-    /// compile here — `E0597`, the borrow does not live long enough — even though
-    /// neighbouring four-argument [`save!`](crate::save!) and
-    /// [`load_cache!`](crate::load_cache!) both accept an owned key:
+    /// The key is anything `Into<String>` — a literal, a `const`, or a `String`
+    /// built at run time — the same as [`load_cache!`](crate::load_cache!) and the
+    /// four-argument [`save!`](crate::save!). Until 0.4 this took `&'static str` and
+    /// answered a computed key with `E0597`:
     ///
-    /// ```compile_fail
+    /// ```
     /// # use express_it::prelude::*;
     /// # struct State { v: f64 }
     /// # struct Ctx;
     /// # impl Context for Ctx { type ContextItem<'w, 's> = State; }
-    /// let key = String::from("per-run-slot");
-    /// let step = Node::<f64, Ctx, _>::lit(1.0).alias(key.as_str());
-    /// # let _ = step;
+    /// let key = format!("slot_{}", 7);
+    /// let step = Node::<f64, Ctx, _>::lit(1.0).alias(key);
+    /// assert_eq!(step.key, "slot_7");
     /// ```
-    ///
-    /// That asymmetry is a known wart of this API, not a design claim; see the
-    /// 0.3.0 release notes. Until it is closed, pass a literal, or leak the
-    /// string with `Box::leak` if the key really is computed and the program
-    /// lives as long as the plan.
-    pub fn alias(self, key: &'static str) -> CacheSaveStep<N, C, E> {
-        CacheSaveStep { key, expr: self }
+    pub fn alias(self, key: impl Into<String>) -> CacheSaveStep<N, C, E> {
+        CacheSaveStep::new(key, self)
     }
 }
 
@@ -205,27 +199,38 @@ impl<N: fmt::Display, C: Context, E: Expr<N, C> + fmt::Display> fmt::Display for
 /// Evaluates `expr` and stores the result in the PlanCache under `key`.
 /// Does NOT write to the context state — pure cache-only step.
 pub struct CacheSaveStep<N: 'static, C: Context, E> {
-    /// The cache slot to write. `&'static str`, so a literal or a leaked string:
-    /// a key built at run time does not compile here, unlike the owned key the
-    /// four-argument `save!` and `load_cache!` accept.
-    pub key: &'static str,
+    /// The cache slot to write. Owned, so a key computed at run time works here
+    /// exactly as it does for [`load_cache!`](crate::load_cache) and the
+    /// four-argument [`save!`](crate::save).
+    pub key: String,
     /// The expression evaluated and stored; the context is never written.
     pub expr: Node<N, C, E>,
 }
 
-// Hand-written, like the `Node` impls: `C` is a marker parameter here, so a
-// derived impl would demand `C: Clone`/`C: Copy` and leave the plain unit-struct
-// contexts used across the examples unable to clone their own steps.
-impl<N: 'static, C: Context, E: Clone> Clone for CacheSaveStep<N, C, E> {
-    fn clone(&self) -> Self {
+impl<N: 'static, C: Context, E> CacheSaveStep<N, C, E> {
+    /// Builds a cache-save step: `expr` is evaluated on every run and stored under
+    /// `key`. [`Node::alias`] is the shorter spelling of the same step.
+    pub fn new(key: impl Into<String>, expr: Node<N, C, E>) -> Self {
         Self {
-            key: self.key,
-            expr: self.expr.clone(),
+            key: key.into(),
+            expr,
         }
     }
 }
 
-impl<N: 'static, C: Context, E: Copy> Copy for CacheSaveStep<N, C, E> {}
+// Hand-written, like the `Node` impls: `C` is a marker parameter here, so a
+// derived impl would demand `C: Clone` and leave the plain unit-struct contexts
+// used across the examples unable to clone their own steps. There is no `Copy`
+// twin: the key owns a `String`, as it has since the run-time key was allowed,
+// whatever bounds the payload says — the same reason `AssignmentStep` has none.
+impl<N: 'static, C: Context, E: Clone> Clone for CacheSaveStep<N, C, E> {
+    fn clone(&self) -> Self {
+        Self {
+            key: self.key.clone(),
+            expr: self.expr.clone(),
+        }
+    }
+}
 
 pub type Var<N, C> = Node<N, C, VarExpr<N, C>>;
 

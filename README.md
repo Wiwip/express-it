@@ -171,7 +171,7 @@ fn main() {
 }
 ```
 
-## Two constraints to know before writing a context
+## Two things to know about contexts and keys
 
 **The context type must be `Send + Sync`.** `Context` carries that bound, so a
 context *struct* holding `Rc<RefCell<State>>` is refused with `E0277: cannot be
@@ -182,13 +182,15 @@ data and the bound does not reach your state: a single-threaded host keeps
 what `save_with!` takes; `save!` generates `ctx.field = value` and a handle has no
 field. `Arc<Mutex<State>>` and `Arc<RwLock<State>>` work on either side.
 
-**Cache keys come in two types.** `save_cache!` and `Node::alias` want
-`&'static str`; `load_cache!`, `PlanCache::set` and `save!`'s optional fourth
-argument take an owned key. A key computed at run time therefore compiles on the
-lookup side and fails on the store side with `E0597` — the borrow does not live
-long enough. Pass a literal or a `const`, or `Box::leak` the string if the key is
-genuinely computed and the program outlives the plan. This inconsistency predates
-0.3 and is listed under *Known limitations* in the release notes.
+**Cache keys are owned.** `save_cache!`, `Node::alias`, `load_cache!`,
+`PlanCache::set` and `save!`'s optional fourth argument all take any
+`Into<String>`, so a key you build at run time — from an entity id, say — works on
+both the write and the lookup side. (It did not until 0.4: the two write-side entry
+points demanded `&'static str` and answered a computed key with `E0597`.)
+*Dependency* keys make the opposite trade: `DepKey::Name` borrows a `&'static str`,
+so `Node::var` and `Deps::contains_name` need a name that outlives the program; a
+name that only exists at run time can still be tested against a set with
+`deps.iter().any(|k| k.as_name() == Some(runtime.as_str()))`.
 
 ## Panics and failure semantics
 

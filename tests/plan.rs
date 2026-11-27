@@ -199,3 +199,25 @@ fn loading_a_key_of_the_wrong_type_reports_a_distinguishable_err() {
     assert_eq!(key, "sidebar_note");
     assert_eq!(expected, "f32");
 }
+
+#[test]
+fn a_key_built_at_run_time_writes_and_reads() {
+    // What 0.3 could not do: `save_cache!` and `Node::alias` wanted a
+    // `&'static str`, so a computed key compiled on the lookup side and gave
+    // `E0597` on the write side. Both halves now go through `Into<String>`.
+    for i in 0..3 {
+        let key = format!("damage_{i}");
+        let mut state = combat();
+
+        let plan = Plan::<CombatCtx>::new()
+            .step(save_cache!(key.clone(), Node::lit(i)))
+            .step(load_cache!(i32, key));
+
+        plan.run(&mut state)
+            .unwrap_or_else(|err| panic!("round trip through `{i}` must run, got {err:?}"));
+    }
+
+    // `Node::alias` takes the same owned key, and hands it back on the step.
+    let step = Node::<i32, CombatCtx, _>::lit(7).alias(String::from("computed_alias"));
+    assert_eq!(step.key, "computed_alias");
+}

@@ -12,6 +12,20 @@ guarantees about its own dependency graph.
 
 ### Breaking
 
+- Cache keys are owned on both sides. `CacheSaveStep.key` is a `String` where it
+  was a `&'static str`, and `Node::alias` and `save_cache!` take any
+  `Into<String>`, which is what `load_cache!`, `PlanCache::set` and `save!`'s
+  fourth argument already did. A key computed at run time — from an entity id, the
+  case that prompted this — now compiles on the write side. This closes the first
+  entry of the 0.3.0 *Known limitations*.
+
+  Two consequences. `CacheSaveStep` no longer implements `Copy` (it did for
+  `E: Copy`), because a key that owns its string is not `Copy`; `Clone` is
+  unaffected, and `AssignmentStep` never had a `Copy` twin for the same reason. And
+  a hand-written `CacheSaveStep { key, expr }` literal still compiles but must now
+  hand over an owned key — `CacheSaveStep::new`, `Node::alias` or `save_cache!` sidestep
+  it. Dependency keys are untouched: `DepKey::Name` still borrows a `&'static str`,
+  so `Node::var` names remain `'static` by design.
 - A name-keyed variable prints its own name. `Node::var("hp", …)` renders as
   `var:hp` where it used to render `var`, matching how `DepKey` renders a name key.
   A tree of several variables used to print `var` once per variable with nothing to
@@ -225,14 +239,14 @@ saying, since "applied in declaration order" invited the opposite reading.
 Recorded here because a caller meets all three, and none of them is fixed in this
 release — they are documented, and each has a note at the item that raises it.
 
-* **Cache keys come in two lifetimes.** `save_cache!` and `Node::alias` take
+* **Cache keys came in two lifetimes.** `save_cache!` and `Node::alias` took
   `&'static str`; the four-argument `save!`, `load_cache!` and `PlanCache` all
-  take an owned key. A key built at run time therefore compiles for the lookup and
-  fails for the store with `E0597` — the borrow does not live long enough — which is the
-  obvious thing to try when a key is derived from an entity id. The split is not
-  new in 0.3.0: both halves trace to the first commit of the current design. It
-  is an API inconsistency, so it is left for a release that may break, and the
-  workaround meanwhile is a literal, a `const`, or `Box::leak`.
+  took an owned key. A key built at run time therefore compiled for the lookup and
+  failed for the store with `E0597` — the borrow does not live long enough — which is
+  the obvious thing to try when a key is derived from an entity id. The split
+  traced to the first commit of the current design, and was left here as an API
+  inconsistency for a release that may break. That release closed it: both sides
+  now take `Into<String>`, so this limitation no longer applies.
 * **`Context: Send + Sync`.** A context *type* holding `Rc<RefCell<_>>` is rejected
   with `E0277`. The bound stops at the context type and does not reach the state,
   so a single-threaded host keeps `Rc<RefCell<State>>` as its read and write view;

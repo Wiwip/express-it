@@ -440,7 +440,7 @@ where
                 step: type_name_of_val(self),
                 expected: type_name::<N>(),
             })?;
-        cache.set(self.key.to_string(), *v);
+        cache.set(self.key.clone(), *v);
         Ok(())
     }
 }
@@ -517,18 +517,13 @@ macro_rules! save_with {
 /// Usage:
 ///   let plan = plan.step(save_cache!("my_key", Node::lit(42)));
 ///
-/// The key is a `&'static str` — a literal, a `const`, or a leaked `String` —
-/// unlike the owned key the four-argument `save!` accepts and `load_cache!`
-/// looks up with. A key built at run time gives `E0597` here; the 0.3.0 release
-/// notes list this as a known inconsistency.
+/// The key is anything `Into<String>`, so a key built at run time works here as it
+/// does for [`load_cache!`](crate::load_cache) and the four-argument
+/// [`save!`](crate::save). It used to demand a
+/// `&'static str`, which made a computed key an `E0597` on the write side only.
 #[macro_export]
 macro_rules! save_cache {
-    ($key:expr, $expr:expr) => {{
-        $crate::nodes::CacheSaveStep {
-            key: $key,
-            expr: $expr,
-        }
-    }};
+    ($key:expr, $expr:expr) => {{ $crate::nodes::CacheSaveStep::new($key, $expr) }};
 }
 
 /// Inline macro to create a cache-lookup step: [`CacheLookupStep`], which reads a
