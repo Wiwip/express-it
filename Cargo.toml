@@ -13,6 +13,11 @@ readme = "README.md"
 keywords = ["expression", "tree", "plan", "ecs", "game"]
 categories = ["game-development", "rust-patterns"]
 
+# docs.rs builds what a consumer reads. The crate has no feature flags today, so
+# `all-features` is future-proofing rather than a change in what gets built.
+[package.metadata.docs.rs]
+all-features = true
+
 [dependencies]
 # Keep the default features on: num-traits' `std` feature forwards `Float::clamp`
 # to std's inherent `f32::clamp`/`f64::clamp`, which is what makes the documented

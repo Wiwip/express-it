@@ -28,11 +28,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Every cargo job below runs `--locked`, except `cargo fmt`, which takes no
+      # such flag (it resolves nothing, so there is nothing to lock). The other
+      # jobs must not silently rewrite `Cargo.lock` from whatever versions the
+      # registry offers, or CI tests a dependency graph nobody ran locally. This is
+      # not hypothetical: a plain `cargo bench --no-run` on this repository updated
+      # the committed lock (blake3 1.8.7 to 1.8.8) while every check still passed.
       - name: Formatting
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   test:
     name: Test (${{ matrix.os }})
@@ -50,13 +56,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build (including tests, benches and examples)
-        run: cargo build --all-targets --all-features
+        run: cargo build --locked --all-targets --all-features
 
       - name: Tests
-        run: cargo test --all-features
+        run: cargo test --locked --all-features
 
       - name: Tests, release profile
-        run: cargo test --release --all-features
+        run: cargo test --locked --release --all-features
 
       # The generated cases are cheap, so one job pays for a deeper sweep than the
       # 300 that `tests/properties.rs` configures (proptest's own default is 256):
@@ -66,12 +72,12 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         env:
           PROPTEST_CASES: "2000"
-        run: cargo test --release --test properties
+        run: cargo test --locked --release --test properties
 
       # The four benches are `harness = false` (criterion); compiling them catches
       # a bench that drifted from the library without spending a benchmark run.
       - name: Benches compile
-        run: cargo bench --no-run
+        run: cargo bench --locked --no-run
 
   msrv:
     name: MSRV (library only, 1.85.0)
@@ -108,12 +114,12 @@ jobs:
       - name: Rustdoc, warnings are errors
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --locked --no-deps --all-features
 
       - name: Doctests
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo test --doc --all-features
+        run: cargo test --locked --doc --all-features
 
   package:
     name: Packaging
@@ -133,15 +139,15 @@ jobs:
           grep -q '^license = "MIT OR Apache-2.0"' Cargo.toml
           test -f LICENSE-MIT
           test -f LICENSE-APACHE
-          cargo package --list | grep -qx 'LICENSE-MIT'
-          cargo package --list | grep -qx 'LICENSE-APACHE'
+          cargo package --locked --list | grep -qx 'LICENSE-MIT'
+          cargo package --locked --list | grep -qx 'LICENSE-APACHE'
 
       - name: List the packaged file set
-        run: cargo package --list
+        run: cargo package --locked --list
 
       # Publishability without uploading: builds the packed tree the way a
       # consumer would get it. It needs the registry index, so it cannot run
       # offline. It does not gate missing metadata — cargo warns about that and
       # succeeds — which is what the step above is for.
       - name: Publish dry run
-        run: cargo publish --dry-run
+        run: cargo publish --locked --dry-run
