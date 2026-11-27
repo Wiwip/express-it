@@ -291,6 +291,23 @@ let mut both = hp.dependencies();
 both.union_with(&attack.dependencies());
 assert_eq!(both.iter().filter(|key| key.as_name().is_some()).count(), 2);
 
+// A named variable prints its own name, so a rendered tree says which is which.
+// (`Node::new` variables have no name and print a bare `var`.)
+assert_eq!(hp.to_string(), "var:health");
+
+// The set splits by key kind, and sorts when you want a listing that does not
+// depend on hash order.
+let mut names: Vec<&str> = deps.names().collect();
+names.sort_unstable();
+assert_eq!(names, ["attack", "health"]);
+assert_eq!(deps.types().count(), 0, "nothing here is keyed by type");
+
+// The invalidation question — did this tree start reading anything new? — is a
+// set difference.
+let mut newly_read = deps.clone();
+newly_read.difference_with(&hp.dependencies());
+assert_eq!(newly_read.len(), 1, "`attack`, which the old tree did not read");
+
 // A tree of literals reads nothing at all.
 assert!(Node::<f32, GameCtx, _>::lit(1.0).dependencies().is_empty());
 ```

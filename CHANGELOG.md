@@ -10,6 +10,16 @@ Work toward 0.4.0. Nothing here changes what an existing program does: the API
 additions are additive, and the CI change alters only what the repository
 guarantees about its own dependency graph.
 
+### Breaking
+
+- A name-keyed variable prints its own name. `Node::var("hp", …)` renders as
+  `var:hp` where it used to render `var`, matching how `DepKey` renders a name key.
+  A tree of several variables used to print `var` once per variable with nothing to
+  tell them apart, which is the opposite of what printing a tree is for.
+  Anonymous `Node::new` variables still print `var`, and `var_leaf!` leaves still
+  print their own type's `Display`, so only `Node::var` output moves. Anything that
+  parses rendered trees has one string to fix.
+
 ### Added
 
 - `Deps` grew the set algebra a dependency watcher needs — `intersect_with`,

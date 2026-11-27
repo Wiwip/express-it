@@ -320,8 +320,9 @@ impl<N, C: Context> Node<N, C, VarExpr<N, C>> {
     /// Names are compared by exact string equality: `"hp"` and `"HP"` are two
     /// different keys. A name key never collides with a type key either, so a named
     /// variable and a [`var_leaf!`](crate::var_leaf) leaf sit in one `Deps` set
-    /// side by side. The name is *not* used by `Display` — a tree of named variables
-    /// still prints `var` for each of them.
+    /// side by side. The name is also what the leaf prints as, so a rendered tree
+    /// says which variable is which — `var:hp` — while a [`Node::new`] variable has
+    /// no name to print and shows a bare `var`.
     ///
     /// Three limits worth knowing before you pick names.
     ///
@@ -405,8 +406,14 @@ impl<N: 'static, C: Context + 'static> Expr<N, C> for VarExpr<N, C> {
 impl<N, C: Context> Copy for VarExpr<N, C> {}
 
 impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
+    /// A named variable prints `var:<name>`, matching how
+    /// [`DepKey::to_string`](crate::expr::DepKey::to_string) renders a name key; an
+    /// anonymous [`Node::new`] variable has no name and prints `var`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "var")
+        match self.key {
+            Some(key) => write!(f, "var:{key}"),
+            None => write!(f, "var"),
+        }
     }
 }
 
@@ -1144,6 +1151,20 @@ mod tests {
             var_keys.len(),
             1,
             "the pinned VarExpr behaviour is untouched by the macro"
+        );
+    }
+
+    #[test]
+    fn a_named_variable_prints_its_name_and_an_anonymous_one_prints_var() {
+        let named = Node::<f32, Ctx, _>::var("hp", |()| 30.0f32);
+        let anonymous = Node::<f32, Ctx, _>::new(|()| 30.0f32);
+
+        assert_eq!(named.to_string(), "var:hp");
+        assert_eq!(anonymous.to_string(), "var");
+        assert_eq!(
+            (named * 2.0).to_string(),
+            "(var:hp * 2)",
+            "the name reaches through the operator nodes, which is the whole point"
         );
     }
 }
