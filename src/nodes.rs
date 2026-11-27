@@ -406,9 +406,8 @@ impl<N: 'static, C: Context + 'static> Expr<N, C> for VarExpr<N, C> {
 impl<N, C: Context> Copy for VarExpr<N, C> {}
 
 impl<N: fmt::Display, C: Context> fmt::Display for VarExpr<N, C> {
-    /// A named variable prints `var:<name>`, matching how
-    /// [`DepKey::to_string`](crate::expr::DepKey::to_string) renders a name key; an
-    /// anonymous [`Node::new`] variable has no name and prints `var`.
+    /// A named variable prints `var:<name>`, the same rendering [`DepKey`] gives a
+    /// name key; an anonymous [`Node::new`] variable has no name and prints `var`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.key {
             Some(key) => write!(f, "var:{key}"),

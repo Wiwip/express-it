@@ -38,6 +38,17 @@ guarantees about its own dependency graph.
 - `[package.metadata.docs.rs]` with `all-features = true`, so docs.rs builds what a
   consumer reads. The crate declares no features today, so this changes nothing
   about what gets built.
+- `save_with!`, the seventh exported macro and the setter-taking twin of `save!`
+  (re-exported by the prelude). `save!` generates `|ctx, val| ctx.field = val`, so
+  it needs the write view to *be* the struct; a view that is a handle —
+  `Rc<RefCell<State>>`, the usual single-threaded shape — has no field to name and
+  had no macro at all. Hand-writing `AssignmentStep::new` worked and still does;
+  this is the same step in one line.
+- `AssignmentStep` had no documentation of its own (nor did its three fields). It
+  now states the setter's bound, and a `compile_fail` example pins the one way to
+  get it wrong: a setter that captures an `Rc` is `E0277`, because a step is
+  `Send + Sync`. A context doc example shows the shape that does work — the
+  `Rc<RefCell<_>>` as the *view*, with a `Send + Sync` marker context — and runs.
 
 ### Changed
 
@@ -46,8 +57,19 @@ guarantees about its own dependency graph.
   rewriting `Cargo.lock` (blake3 1.8.7 to 1.8.8) while every check stayed green,
   which means CI could test a graph nobody had run locally.
 
-Library `missing_docs` warnings went from 149 to 148: `PlanCache::set` had none,
-and everything added here ships with one.
+### Corrected
+
+- The 0.3.0 *Known limitations* entry for `Context: Send + Sync` said a
+  single-threaded host "must use `Arc<Mutex<_>>` or `Arc<RwLock<_>>`". It does not.
+  Measured: with a `Send + Sync` context marker, `type ContextItem<'w, 's> =
+  Rc<RefCell<State>>` compiles, evaluates, and runs plans; `E0277` appears only when
+  the context type itself holds the `Rc`, and a context carries no data. The
+  original wording is corrected in place in that section, since leaving a false
+  limitation published is worse than editing a released note.
+
+Library `missing_docs` warnings went from 149 to 144 across these commits:
+`PlanCache::set` had none, `AssignmentStep` and its three fields had none, and
+everything added here ships with its own documentation.
 
 ## 0.3.0
 
@@ -211,8 +233,12 @@ release — they are documented, and each has a note at the item that raises it.
   new in 0.3.0: both halves trace to the first commit of the current design. It
   is an API inconsistency, so it is left for a release that may break, and the
   workaround meanwhile is a literal, a `const`, or `Box::leak`.
-* **`Context: Send + Sync`.** A context holding `Rc<RefCell<_>>` is rejected with
-  `E0277`, so a single-threaded host must use `Arc<Mutex<_>>` or `Arc<RwLock<_>>`.
+* **`Context: Send + Sync`.** A context *type* holding `Rc<RefCell<_>>` is rejected
+  with `E0277`. The bound stops at the context type and does not reach the state,
+  so a single-threaded host keeps `Rc<RefCell<State>>` as its read and write view;
+  `save_with!` (added since 0.3.0) writes through such a handle, and `Arc<Mutex<_>>`
+  or `Arc<RwLock<_>>` is not required. This bullet originally claimed a
+  single-threaded host "must use" those — see the correction note in *Unreleased*.
   The bound arrived one commit into the 0.2.0 window — `8bf50ab`, with `Cargo.toml`
   already reading 0.2.0 — and was stated nowhere until now, so anyone pinning an
   older checkout finds it unannounced in the source and unmentioned here.

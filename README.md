@@ -173,10 +173,14 @@ fn main() {
 
 ## Two constraints to know before writing a context
 
-**A context must be `Send + Sync`.** `Context` carries that bound, so a context
-holding `Rc<RefCell<State>>` is refused with `E0277: cannot be shared between
-threads safely`. `Arc<Mutex<State>>` and `Arc<RwLock<State>>` are accepted, and
-the read view your leaves receive carries no such requirement.
+**The context type must be `Send + Sync`.** `Context` carries that bound, so a
+context *struct* holding `Rc<RefCell<State>>` is refused with `E0277: cannot be
+shared between threads safely`. That rarely bites, because a context carries no
+data and the bound does not reach your state: a single-threaded host keeps
+`Rc<RefCell<State>>` as its read and write view and hands the handle to `eval` or
+`Plan::run`. Writing to such a view needs a setter rather than a field, which is
+what `save_with!` takes; `save!` generates `ctx.field = value` and a handle has no
+field. `Arc<Mutex<State>>` and `Arc<RwLock<State>>` work on either side.
 
 **Cache keys come in two types.** `save_cache!` and `Node::alias` want
 `&'static str`; `load_cache!`, `PlanCache::set` and `save!`'s optional fourth

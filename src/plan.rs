@@ -290,9 +290,54 @@ impl<C: ContextMut> Plan<C> {
 
 // ---------- AssignmentStep ----------
 
+/// One plan step: evaluate an expression, write the value through a setter, and
+/// optionally stash a copy in the run's [`PlanCache`].
+///
+/// [`save!`](crate::save) builds one for a plain field, [`save_with!`](crate::save_with)
+/// builds one for a setter you name, and [`AssignmentStep::new`] is the same thing
+/// without the macro.
+///
+/// The setter must be `Send + Sync + 'static`, because a step is. It may therefore
+/// not capture a single-threaded handle: writing through an `Rc<RefCell<_>>` *view*
+/// is fine, capturing an `Rc` inside the setter is not.
+///
+/// ```compile_fail
+/// use express_it::prelude::*;
+/// use std::{cell::RefCell, rc::Rc};
+///
+/// struct Ctx;
+/// impl Context for Ctx {
+///     type ContextItem<'w, 's> = ();
+/// }
+/// impl ContextMut for Ctx {
+///     type ContextItemMut<'w, 's> = ();
+///     fn as_readonly<'w, 's, 'a>(
+///         m: &'a Self::ContextItemMut<'w, 's>,
+///     ) -> Self::ContextItem<'a, 's> {
+///         *m
+///     }
+/// }
+///
+/// let log: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
+/// let step = AssignmentStep::new(
+///     |_: &mut (), value: i32| log.borrow_mut().push(value),
+///     Node::<i32, Ctx, _>::lit(1),
+///     None,
+/// );
+/// let _plan = Plan::<Ctx>::new().step(step);
+/// ```
+///
+/// `E0277: Rc<RefCell<Vec<i32>>> cannot be shared between threads safely`, at the
+/// `step` call that asks for a `Send + Sync` executor.
 pub struct AssignmentStep<N: 'static, E, S> {
+    /// Writes the evaluated value into the context: any
+    /// `Fn(&mut C::ContextItemMut<'_, '_>, N)` that is `Send + Sync + 'static`.
+    /// A non-capturing closure coerces to a `fn` pointer and always qualifies.
     pub setter_fn: S,
+    /// The expression whose value gets written.
     pub expr: E,
+    /// When set, the same value is cloned into the run cache under this key for a
+    /// later [`load_cache!`](crate::load_cache) to find.
     pub cache_key: Option<String>,
     // Carries `N`, the value type this step writes. It is not a field type — the
     // expression and the setter both mention it indirectly — so nothing but this
@@ -419,6 +464,10 @@ where
 /// Examples:
 ///   let plan = plan.step(save!(CombatState, damage_dealt, Node::lit(35)));
 ///   let plan = plan.step(save!(CombatState, heal_received, heal_expr, "applied_heal"));
+///
+/// The generated setter is `|ctx, val| ctx.field = val`, so the write view has to
+/// *be* the struct. When it is a handle instead — `Rc<RefCell<State>>`, a wrapper
+/// that validates on write — name the setter with [`save_with!`](crate::save_with).
 #[macro_export]
 macro_rules! save {
     ($ctx_ty:ty, $field:ident, $expr:expr) => {{
@@ -429,6 +478,33 @@ macro_rules! save {
         let setter_fn = |ctx: &mut $ctx_ty, val| ctx.$field = val;
         $crate::plan::AssignmentStep::new(setter_fn, $expr, Some($key.to_string()))
     }};
+}
+
+/// Shorthand for an [`AssignmentStep`] whose setter you write, for the write views
+/// [`save!`] cannot reach.
+///
+/// `save!` generates `|ctx, val| ctx.field = val`, which needs the write view to be
+/// the struct itself. A view that is a handle — the usual single-threaded shape,
+/// `Rc<RefCell<State>>` — has no field to name, so hand the setter over instead:
+///
+/// ```text
+/// let step = save_with!(
+///     |s: &mut Rc<RefCell<State>>, v: i32| s.borrow_mut().hp = v,
+///     Node::lit(9),
+/// );
+/// ```
+///
+/// 2 forms:
+///   save_with!(setter, expr)              -> cache_key: None
+///   save_with!(setter, expr, cache_key)   -> cache_key: Some(cache_key.to_string())
+///
+/// The setter is stored as the [`AssignmentStep`] it builds, so it carries the same
+/// requirement: `Send + Sync + 'static`, which a non-capturing closure always
+/// satisfies and a closure that captured an `Rc` does not.
+#[macro_export]
+macro_rules! save_with {
+    ($setter:expr, $expr:expr $(,)?) => {{ $crate::plan::AssignmentStep::new($setter, $expr, None) }};
+    ($setter:expr, $expr:expr, $key:expr $(,)?) => {{ $crate::plan::AssignmentStep::new($setter, $expr, Some($key.to_string())) }};
 }
 
 /// Inline macro to create a cache-save step: [`CacheSaveStep`], which writes the
@@ -986,5 +1062,49 @@ mod tests {
             save!(State, note, Node::lit(2)),
         ));
         assert_eq!(grouped.len(), 1, "the tuple is one step, not two");
+    }
+
+    #[test]
+    fn save_with_writes_through_a_handle_that_save_cannot_name() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        #[derive(Debug, Default, PartialEq)]
+        struct HeapState {
+            hp: i32,
+        }
+
+        #[derive(Clone, Copy)]
+        struct HandleCtx;
+
+        impl Context for HandleCtx {
+            type ContextItem<'w, 's> = Rc<RefCell<HeapState>>;
+        }
+
+        impl ContextMut for HandleCtx {
+            type ContextItemMut<'w, 's> = Rc<RefCell<HeapState>>;
+            fn as_readonly<'w, 's, 'a>(
+                m: &'a Self::ContextItemMut<'w, 's>,
+            ) -> Self::ContextItem<'a, 's> {
+                Rc::clone(m)
+            }
+        }
+
+        // `save!(HeapState, hp, …)` would not compile here: it generates
+        // `|ctx, val| ctx.hp = val` and an `Rc<RefCell<HeapState>>` has no `hp`.
+        let step = save_with!(
+            |s: &mut Rc<RefCell<HeapState>>, v: i32| s.borrow_mut().hp = v,
+            Node::lit(11),
+            "written"
+        );
+        let plan = Plan::<HandleCtx>::new()
+            .step(step)
+            .step(load_cache!(i32, "written"));
+
+        let state = Rc::new(RefCell::new(HeapState::default()));
+        plan.run(&mut Rc::clone(&state))
+            .expect("a handle view runs plans, single-threaded host and all");
+
+        assert_eq!(state.borrow().hp, 11, "the setter wrote through the handle");
     }
 }

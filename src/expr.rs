@@ -33,7 +33,33 @@ use std::fmt;
 /// fails with `E0277`, twice over: `Rc<RefCell<f32>> cannot be shared between
 /// threads safely` and `… cannot be sent between threads safely`. `Arc<Mutex<T>>`
 /// and `Arc<RwLock<T>>` are fine. The bound is on the context type alone; the
-/// read view it hands out carries no such requirement.
+/// read view it hands out carries no such requirement, so a single-threaded host
+/// keeps its `Rc<RefCell<_>>` state — it just lives in the view rather than in the
+/// context type:
+///
+/// ```
+/// use express_it::prelude::*;
+/// use std::{cell::RefCell, rc::Rc};
+///
+/// #[derive(Clone, Copy, Default)]
+/// struct State {
+///     hp: i32,
+/// }
+///
+/// #[derive(Clone, Copy)]
+/// struct Ctx;
+///
+/// impl Context for Ctx {
+///     type ContextItem<'w, 's> = Rc<RefCell<State>>;
+/// }
+///
+/// let shared = Rc::new(RefCell::new(State { hp: 7 }));
+/// let hp = Node::<i32, Ctx, _>::new(|s: &Rc<RefCell<State>>| s.borrow().hp);
+/// assert_eq!(hp.eval(&shared), 7);
+/// ```
+///
+/// Plans run over such a view as well; a step for it needs a setter rather than a
+/// field, which is what [`save_with!`](crate::save_with) is for.
 pub trait Context: Send + Sync {
     /// The read view handed to every leaf during one evaluation.
     type ContextItem<'w, 's>;

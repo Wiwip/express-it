@@ -89,7 +89,7 @@ pub mod prelude {
     pub use crate::plan::{
         AssignmentStep, CacheLookupStep, Plan, PlanCache, PlanError, StepExecutor,
     };
-    pub use crate::{all, any, load_cache, save, save_cache, var_leaf};
+    pub use crate::{all, any, load_cache, save, save_cache, save_with, var_leaf};
 }
 
 /// Test-only leaves and key helpers, for the `get_dependencies` tests.

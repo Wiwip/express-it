@@ -1,7 +1,7 @@
 //! One glob import has to be enough: every trait whose method the workload calls,
-//! every type a caller has to write down, plus the six exported macros (`all`,
-//! `any`, `save`, `save_cache`, `load_cache`, `var_leaf`), arrive through
-//! `express_it::prelude`.
+//! every type a caller has to write down, plus the seven exported macros (`all`,
+//! `any`, `save`, `save_with`, `save_cache`, `load_cache`, `var_leaf`), arrive
+//! through `express_it::prelude`.
 //!
 //! The last test pins the other half of the contract — the prelude is additive,
 //! so the pre-existing full paths keep resolving and name the very same items.
@@ -174,6 +174,49 @@ fn prelude_alone_supports_a_plan_built_with_the_three_step_macros() {
         .run(&mut state)
         .expect_err("a missing key is an Err, not a panic");
     assert!(matches!(err, PlanError::CacheMiss { .. }));
+}
+
+/// `save_with!` is the seventh export, and the prelude glob alone is enough to run
+/// a plan over an `Rc<RefCell<_>>` view — the shape `save!` cannot write to, because
+/// it generates `|ctx, val| ctx.field = val` and a handle has no field.
+#[test]
+fn prelude_alone_supports_a_handle_view_written_by_save_with() {
+    use std::{cell::RefCell, rc::Rc};
+
+    #[derive(Debug, Default, PartialEq)]
+    struct Heap {
+        hp: f32,
+    }
+
+    #[derive(Clone, Copy)]
+    struct HandleCtx;
+
+    impl Context for HandleCtx {
+        type ContextItem<'w, 's> = Rc<RefCell<Heap>>;
+    }
+
+    impl ContextMut for HandleCtx {
+        type ContextItemMut<'w, 's> = Rc<RefCell<Heap>>;
+        fn as_readonly<'w, 's, 'a>(
+            m: &'a Self::ContextItemMut<'w, 's>,
+        ) -> Self::ContextItem<'a, 's> {
+            Rc::clone(m)
+        }
+    }
+
+    let step = save_with!(
+        |h: &mut Rc<RefCell<Heap>>, v: f32| h.borrow_mut().hp = v,
+        Node::lit(12.5f32),
+        "hp_written"
+    );
+    let plan = Plan::<HandleCtx>::new()
+        .step(step)
+        .step(load_cache!(f32, "hp_written"));
+
+    let heap = Rc::new(RefCell::new(Heap::default()));
+    plan.run(&mut Rc::clone(&heap))
+        .expect("no import beyond the prelude is needed for a single-threaded host");
+    assert_eq!(heap.borrow().hp, 12.5);
 }
 
 /// A step written by hand, named entirely through the prelude glob: `StepExecutor`,
